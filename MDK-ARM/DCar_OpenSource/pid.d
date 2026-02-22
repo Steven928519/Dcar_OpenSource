@@ -31,5 +31,6 @@ dcar_opensource\pid.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr.h
 dcar_opensource\pid.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr_ex.h
 dcar_opensource\pid.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim.h
 dcar_opensource\pid.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_ex.h
+dcar_opensource\pid.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h
 dcar_opensource\pid.o: ../Core/Inc/encoder.h
 dcar_opensource\pid.o: D:\keil555\ARM\ARMCC\Bin\..\include\string.h

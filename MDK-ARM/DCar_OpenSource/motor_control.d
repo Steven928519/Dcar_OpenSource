@@ -31,7 +31,9 @@ dcar_opensource\motor_control.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_h
 dcar_opensource\motor_control.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr_ex.h
 dcar_opensource\motor_control.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim.h
 dcar_opensource\motor_control.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_ex.h
+dcar_opensource\motor_control.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h
 dcar_opensource\motor_control.o: ../Core/Inc/encoder.h
 dcar_opensource\motor_control.o: ../Core/Inc/pid.h
 dcar_opensource\motor_control.o: ../Core/Inc/tim.h
 dcar_opensource\motor_control.o: ../Core/Inc/gpio.h
+dcar_opensource\motor_control.o: ../Core/Inc/uart4_debug.h

@@ -21,7 +21,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 /* USER CODE BEGIN Includes */
-
+#include "stm32f4xx_hal_uart.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -78,5 +78,19 @@ void HAL_MspInit(void)
 }
 
 /* USER CODE BEGIN 1 */
+void HAL_UART_MspInit(UART_HandleTypeDef* huart)
+{
+  if (huart->Instance == UART4) {
+    __HAL_RCC_UART4_CLK_ENABLE();
+    __HAL_RCC_GPIOC_CLK_ENABLE();
 
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    GPIO_InitStruct.Pin = GPIO_PIN_10;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF8_UART4;
+    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+  }
+}
 /* USER CODE END 1 */

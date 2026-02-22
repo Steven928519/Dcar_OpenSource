@@ -9,6 +9,7 @@
 #include "pid.h"
 #include "tim.h"
 #include "gpio.h"
+#include "uart4_debug.h"
 
 /* 电机方向引脚: IN1_Pin, IN2_Pin */
 static const uint16_t motor_in1_pin[] = { AIN1_Pin, BIN1_Pin, CIN1_Pin, DIN1_Pin };
@@ -23,6 +24,9 @@ static PID_TypeDef motor_pid[4];
 
 /* M1、M4 方向取反（电机安装方向与 M2、M3 相反） */
 #define MOTOR_DIR_INVERT(m)  (((m) == 0 || (m) == 3) ? -1 : 1)
+
+/* 速度(脉冲/秒) -> 每周期脉冲(脉冲/10ms): 除以 100 */
+#define SPEED_TO_DELTA(s)   ((s) / 100.0f)
 
 /* 设置电机 PWM 占空比 (0~MOTOR_PWM_PERIOD)，并控制方向 */
 static void Motor_SetPWM(uint8_t motor_id, int16_t pwm_val)
@@ -70,6 +74,9 @@ void MotorControl_Init(void)
              MOTOR_PID_KD_DEFAULT, (float)MOTOR_PWM_PERIOD, -(float)MOTOR_PWM_PERIOD);
     target_speed[i] = 0.0f;
   }
+
+  /* UART4 波形调试输出初始化 (PC10, 115200) */
+  UART4_Debug_Init();
 }
 
 void MotorControl_SetTargetSpeed(uint8_t motor_id, float target_speed_val)
@@ -101,8 +108,17 @@ void MotorControl_Update(void)
 
   for (uint8_t i = 0; i < 4; i++) {
     float current_speed = Encoder_GetSpeed(i) * MOTOR_DIR_INVERT(i);
-    float out = PID_Calc(&motor_pid[i], target_speed[i], current_speed);
+    /* 转为每周期脉冲 (脉冲/10ms)，与参考工程量纲一致 */
+    float target_delta = SPEED_TO_DELTA(target_speed[i]);
+    float current_delta = SPEED_TO_DELTA(current_speed);
+    float out = PID_Calc(&motor_pid[i], target_delta, current_delta);
     Motor_SetPWM(i, (int16_t)out);
+
+    /* M1 电机波形数据通过 UART4(PC10) 每 10ms 发送一帧 (单位: 脉冲/10ms) */
+    if (i == 0) {
+      float err = target_delta - current_delta;
+      UART4_Debug_SendWaveform(target_delta, current_delta, err, out);
+    }
   }
 }
 

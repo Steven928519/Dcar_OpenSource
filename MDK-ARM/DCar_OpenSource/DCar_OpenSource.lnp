@@ -8,6 +8,7 @@
 "dcar_opensource\encoder.o"
 "dcar_opensource\pid.o"
 "dcar_opensource\motor_control.o"
+"dcar_opensource\uart4_debug.o"
 "dcar_opensource\stm32f4xx_hal_tim.o"
 "dcar_opensource\stm32f4xx_hal_tim_ex.o"
 "dcar_opensource\stm32f4xx_hal_rcc.o"
@@ -23,6 +24,7 @@
 "dcar_opensource\stm32f4xx_hal_cortex.o"
 "dcar_opensource\stm32f4xx_hal.o"
 "dcar_opensource\stm32f4xx_hal_exti.o"
+"dcar_opensource\stm32f4xx_hal_uart.o"
 "dcar_opensource\system_stm32f4xx.o"
 --strict --scatter "DCar_OpenSource\DCar_OpenSource.sct"
 --summary_stderr --info summarysizes --map --load_addr_map_info --xref --callgraph --symbols

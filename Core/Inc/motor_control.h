@@ -18,10 +18,10 @@ extern "C" {
 /* PWM 周期 (与 TIM8 Period 一致) */
 #define MOTOR_PWM_PERIOD     999
 
-/* 默认 PID 参数 (可根据实际调试) */
-#define MOTOR_PID_KP_DEFAULT  18.0f
+/* 默认 PID 参数 (与参考工程一致：Error 单位=脉冲/10ms，KP 映射到 0~999 PWM) */
+#define MOTOR_PID_KP_DEFAULT  3.0f
 #define MOTOR_PID_KI_DEFAULT  0.0f
-#define MOTOR_PID_KD_DEFAULT  1.0f
+#define MOTOR_PID_KD_DEFAULT  0.0f
 
 /**
   * @brief  电机控制模块初始化
