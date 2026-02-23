@@ -31,9 +31,9 @@ static inline float RawToSpeedWithDeadzone(uint16_t raw)
 static void Motion_Decouple(float Vx, float Vy, float w)
 {
   float s1 =  Vx + Vy + w;   /* M1 */
-  float s2 =  Vx - Vy + w;   /* M2 */
-  float s3 = -Vx - Vy + w;   /* M3 */
-  float s4 = -Vx + Vy + w;   /* M4 */
+  float s4 =  Vx - Vy + w;   /* M4 */
+  float s3 = -(-Vx - Vy + w);   /* M3 */
+  float s2 = -(-Vx + Vy + w);   /* M2 */
 
   MotorControl_SetAllTargetSpeedMMps(s1, s2, s3, s4);
 }
