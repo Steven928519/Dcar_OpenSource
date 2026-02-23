@@ -14,11 +14,6 @@ extern "C" {
 #include "main.h"
 
 /**
-  * @brief  UART4 初始化 (PC10 TX, 115200 8N1)
-  */
-void UART4_Debug_Init(void);
-
-/**
   * @brief  发送 M1 电机 PID 波形数据 (每 10ms 调用一次)
   * @param  target_speed: 目标 (脉冲/10ms)
   * @param  current_speed: 实际 (脉冲/10ms)

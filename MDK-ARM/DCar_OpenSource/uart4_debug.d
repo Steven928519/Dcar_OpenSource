@@ -32,4 +32,5 @@ dcar_opensource\uart4_debug.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal
 dcar_opensource\uart4_debug.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim.h
 dcar_opensource\uart4_debug.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_ex.h
 dcar_opensource\uart4_debug.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h
+dcar_opensource\uart4_debug.o: ../Core/Inc/usart.h
 dcar_opensource\uart4_debug.o: D:\keil555\ARM\ARMCC\Bin\..\include\stdio.h

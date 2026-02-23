@@ -78,6 +78,8 @@ void Error_Handler(void);
 #define DIN1_GPIO_Port GPIOD
 #define DIN2_Pin GPIO_PIN_7
 #define DIN2_GPIO_Port GPIOD
+#define PS2_DATA_Pin GPIO_PIN_3
+#define PS2_DATA_GPIO_Port GPIOA
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus
