@@ -75,8 +75,6 @@ void MotorControl_Init(void)
     target_speed[i] = 0.0f;
   }
 
-  /* UART4 波形调试输出初始化 (PC10, 115200) */
-  UART4_Debug_Init();
 }
 
 void MotorControl_SetTargetSpeed(uint8_t motor_id, float target_speed_val)

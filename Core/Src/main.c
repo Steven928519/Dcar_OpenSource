@@ -19,11 +19,13 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "tim.h"
+#include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "motor_control.h"
+#include "ps2_receiver.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -93,16 +95,20 @@ int main(void)
   MX_TIM4_Init();
   MX_TIM5_Init();
   MX_TIM6_Init();
+  MX_UART4_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
   /* 电机 PID 速度闭环初始化 (编码器 + PID + PWM) */
   MotorControl_Init();
 
+  /* PS2 遥控器接收模块初始化 (PA3) */
+  PS2_Receiver_Init();
+
   /* 设置 M1~M4 目标线速度：100 mm/s 同向中速 (DF 参数见 encoder.h) */
   MotorControl_SetAllTargetSpeedMMps(500.0f, 500.0f, 500.0f, 500.0f);
 
   /* USER CODE END 2 */
-
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
