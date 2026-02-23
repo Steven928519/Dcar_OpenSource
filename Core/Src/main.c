@@ -26,6 +26,7 @@
 /* USER CODE BEGIN Includes */
 #include "motor_control.h"
 #include "ps2_receiver.h"
+#include "remote_to_motion.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -105,8 +106,8 @@ int main(void)
   /* PS2 遥控器接收模块初始化 (PA3) */
   PS2_Receiver_Init();
 
-  /* 设置 M1~M4 目标线速度：100 mm/s 同向中速 (DF 参数见 encoder.h) */
-  MotorControl_SetAllTargetSpeedMMps(500.0f, 500.0f, 500.0f, 500.0f);
+  /* 遥控转运动模块初始化 */
+  RemoteToMotion_Init();
 
   /* USER CODE END 2 */
 
@@ -117,7 +118,8 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-		HAL_GPIO_WritePin(LED0_GPIO_Port,LED0_Pin,0);
+    RemoteToMotion_Update();   /* 遥控器控制小车运动 */
+    HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin, 0);
   }
   /* USER CODE END 3 */
 }

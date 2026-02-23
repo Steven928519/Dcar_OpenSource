@@ -4,6 +4,8 @@
 "dcar_opensource\pid.o"
 "dcar_opensource\motor_control.o"
 "dcar_opensource\uart4_debug.o"
+"dcar_opensource\ps2_receiver.o"
+"dcar_opensource\remote_to_motion.o"
 "dcar_opensource\main.o"
 "dcar_opensource\gpio.o"
 "dcar_opensource\tim.o"
