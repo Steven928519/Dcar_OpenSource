@@ -24,6 +24,7 @@ typedef struct {
   uint16_t ly;           /* 左摇杆 Y 轴 (CH3) 0~2047 */
   uint16_t rx;           /* 右摇杆 X 轴 (CH1) 0~2047 */
   uint16_t ry;           /* 右摇杆 Y 轴 (CH2) 0~2047 */
+  uint16_t ch6;          /* SBUS CH6 (channels[5]) 用于 O 键等 0~2047 */
   uint16_t buttons;      /* 按键位图 */
   uint8_t  connected;    /* 连接状态: 0=未连接, 1=已连接 */
 } PS2_Data_TypeDef;

@@ -3,12 +3,12 @@
   * @file    remote_to_motion.h
   * @brief   遥控信号转车体目标速度
   *
-  * 控制对应关系:
-  *   LY  -> Vx  -> 前后移动 (正=前)
-  *   LX  -> Vy  -> 左右移动 (正=右)
-  *   RX  -> w   -> 旋转     (正=顺时针)
+ * 控制对应关系:
+ *   LY  -> Vy  -> 前后移动 (正=前，负=后)
+ *   LX  -> Vx  -> 左右移动 (正=右，负=左)
+ *   RX  -> w   -> 旋转     (正=顺时针)
   *
-  * 速度映射: 中位 1024 映射为 0，最大值映射到 ±REMOTE_MAX_SPEED mm/s
+  * 速度映射: SBUS 范围 240~1807，中位 1024 映射为 0，两端映射到 ±REMOTE_MAX_SPEED mm/s
   ******************************************************************************
   */
 #ifndef __REMOTE_TO_MOTION_H__
@@ -20,13 +20,20 @@ extern "C" {
 
 #include "main.h"
 
-/* SBUS 中位值 */
+/* SBUS 输入范围 */
+#define REMOTE_SBUS_MIN    240
+#define REMOTE_SBUS_MAX    1807
+
+/* SBUS 中位值 (240~1807 中心) */
 #define REMOTE_CENTER      1024
+
+/* 有效半程 (中位到最小值的距离，用于速度缩放) */
+#define REMOTE_RANGE       (REMOTE_CENTER - REMOTE_SBUS_MIN)   /* 784 */
 
 /* 死区范围，摇杆在 [1024-REMOTE_DEADZONE, 1024+REMOTE_DEADZONE] 内视为居中 */
 #define REMOTE_DEADZONE    200
 
-/* 速度最大值 (mm/s)，摇杆推满时 Vx/Vy/w 的幅值 */
+/* 速度最大值 (mm/s)，摇杆推满时 Vy/Vx/w 的幅值 */
 #define REMOTE_MAX_SPEED   800.0f
 
 /**

@@ -1,40 +1,40 @@
 /**
   ******************************************************************************
   * @file    ps2_receiver.c
-  * @brief   PS2 遥控器信号接收模块实现
-  *          通过 PA3(USART2_RX) 接收 SBUS 信号，解析后直接存入变量 (0~2047)
+  * @brief   PS2 ???????????
+  *          ?? PA3(USART2_RX) ?? SBUS ???????????? (0~2047)
   ******************************************************************************
   */
 #include "ps2_receiver.h"
 #include "usart.h"
 
-/* SBUS 协议常量 */
+/* SBUS ???? */
 #define SBUS_HEADER        0x0F
 #define SBUS_FOOTER        0x00
 #define SBUS_PACKET_LENGTH 25
 
-/* SBUS 接收状态机 */
+/* SBUS ????? */
 typedef enum {
   SBUS_STATE_WAIT_HEADER = 0,
   SBUS_STATE_RECEIVING   = 1
 } SBUS_State_TypeDef;
 
-/* 当前接收到的 PS2 数据 */
+/* ?????? PS2 ?? */
 static PS2_Data_TypeDef ps2_data;
 
-/* SBUS 接收缓冲与状态 */
+/* SBUS ??????? */
 static uint8_t  sbus_rx_buffer[SBUS_PACKET_LENGTH];
 static uint8_t  sbus_rx_index;
 static SBUS_State_TypeDef sbus_state;
 
-/* 解析 SBUS 数据包，提取 16 通道 */
+/* ?? SBUS ?????? 16 ?? */
 static uint8_t SBUS_Parse_Packet(uint8_t *packet);
 
-/* 将 SBUS 通道直接存入 ps2_data (保留 0~2047 原始值) */
+/* ? SBUS ?????? ps2_data (?? 0~2047 ???) */
 static void SBUS_StoreChannels(uint16_t *channels);
 
 /**
-  * @brief  解析 SBUS 数据包
+  * @brief  ?? SBUS ???
   */
 static uint8_t SBUS_Parse_Packet(uint8_t *packet)
 {
@@ -43,7 +43,7 @@ static uint8_t SBUS_Parse_Packet(uint8_t *packet)
   if (packet[0] != SBUS_HEADER || packet[24] != SBUS_FOOTER)
     return 0;
 
-  /* 提取 16 个通道 (每个 11 位) */
+  /* ?? 16 ??? (?? 11 ?) */
   channels[0]  = ((uint16_t)packet[1]) | ((uint16_t)packet[2] << 8);
   channels[0] &= 0x07FF;
 
@@ -97,20 +97,21 @@ static uint8_t SBUS_Parse_Packet(uint8_t *packet)
 }
 
 /**
-  * @brief  SBUS 通道直接存入变量 (保留 0~2047 原始值)
+  * @brief  SBUS ???????? (?? 0~2047 ???)
   *         CH1->rx, CH2->ry, CH3->ly, CH4->lx
   */
 static void SBUS_StoreChannels(uint16_t *channels)
 {
-  ps2_data.rx = channels[0];   /* CH1 -> 右摇杆 X */
-  ps2_data.ry = channels[1];   /* CH2 -> 右摇杆 Y */
-  ps2_data.ly = channels[2];   /* CH3 -> 左摇杆 Y (接收端已取反) */
-  ps2_data.lx = channels[3];   /* CH4 -> 左摇杆 X */
+  ps2_data.rx = channels[0];   /* CH1 -> ??? X */
+  ps2_data.ry = channels[1];   /* CH2 -> ??? Y */
+  ps2_data.ly = channels[2];   /* CH3 -> ??? Y */
+  ps2_data.lx = channels[3];   /* CH4 -> ??? X */
+  ps2_data.ch6 = channels[5];  /* CH6 -> O ?? */
   ps2_data.connected = 1;
 }
 
 /**
-  * @brief  解析单个 SBUS 字节 (由 UART 接收回调调用)
+  * @brief  ???? SBUS ?? (? UART ??????)
   */
 void PS2_Receiver_ParseByte(uint8_t byte)
 {
@@ -142,28 +143,29 @@ void PS2_Receiver_ParseByte(uint8_t byte)
   }
 }
 
-/* UART 单字节接收缓冲，用于 SBUS */
+/* UART ?????????? SBUS */
 static uint8_t sbus_uart_rx_byte;
 
 void PS2_Receiver_Init(void)
 {
-  /* 初始化数据变量，遥控默认开启 (SBUS 中位约 1024) */
+  /* ?????????????? (SBUS ??? 1024) */
   ps2_data.lx        = 1024;
   ps2_data.ly        = 1024;
   ps2_data.rx        = 1024;
   ps2_data.ry        = 1024;
+  ps2_data.ch6       = 1024;
   ps2_data.buttons   = 0;
-  ps2_data.connected = 1;   /* 遥控默认开启 */
+  ps2_data.connected = 1;   /* ?????? */
 
   sbus_rx_index = 0;
   sbus_state    = SBUS_STATE_WAIT_HEADER;
 
-  /* 启动 USART2 单字节接收 (SBUS) */
+  /* ?? USART2 ????? (SBUS) */
   HAL_UART_Receive_IT(&huart2, &sbus_uart_rx_byte, 1);
 }
 
 /**
-  * @brief  UART 接收完成回调，将字节送入 SBUS 解析
+  * @brief  UART ???????????? SBUS ??
   */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
@@ -181,6 +183,7 @@ void PS2_Receiver_GetData(PS2_Data_TypeDef *data)
   data->ly        = ps2_data.ly;
   data->rx        = ps2_data.rx;
   data->ry        = ps2_data.ry;
+  data->ch6       = ps2_data.ch6;
   data->buttons   = ps2_data.buttons;
   data->connected = ps2_data.connected;
 }
