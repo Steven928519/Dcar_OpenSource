@@ -237,7 +237,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     tick_10ms++;
     if (tick_10ms >= 10) {
       tick_10ms = 0;
-      MotorControl_Update();
+      MotorControl_Update();   /* PID 速度环 */
     }
   }
 }

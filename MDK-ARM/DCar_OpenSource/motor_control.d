@@ -36,4 +36,3 @@ dcar_opensource\motor_control.o: ../Core/Inc/encoder.h
 dcar_opensource\motor_control.o: ../Core/Inc/pid.h
 dcar_opensource\motor_control.o: ../Core/Inc/tim.h
 dcar_opensource\motor_control.o: ../Core/Inc/gpio.h
-dcar_opensource\motor_control.o: ../Core/Inc/uart4_debug.h

@@ -9,7 +9,6 @@
 #include "pid.h"
 #include "tim.h"
 #include "gpio.h"
-#include "uart4_debug.h"
 
 /* 电机方向引脚: IN1_Pin, IN2_Pin */
 static const uint16_t motor_in1_pin[] = { AIN1_Pin, BIN1_Pin, CIN1_Pin, DIN1_Pin };
@@ -111,12 +110,6 @@ void MotorControl_Update(void)
     float current_delta = SPEED_TO_DELTA(current_speed);
     float out = PID_Calc(&motor_pid[i], target_delta, current_delta);
     Motor_SetPWM(i, (int16_t)out);
-
-    /* M1 电机波形数据通过 UART4(PC10) 每 10ms 发送一帧 (单位: 脉冲/10ms) */
-    if (i == 0) {
-      float err = target_delta - current_delta;
-      UART4_Debug_SendWaveform(target_delta, current_delta, err, out);
-    }
   }
 }
 

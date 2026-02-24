@@ -36,3 +36,6 @@ dcar_opensource\main.o: ../Core/Inc/usart.h
 dcar_opensource\main.o: ../Core/Inc/gpio.h
 dcar_opensource\main.o: ../Core/Inc/motor_control.h
 dcar_opensource\main.o: ../Core/Inc/encoder.h
+dcar_opensource\main.o: ../Core/Inc/ps2_receiver.h
+dcar_opensource\main.o: ../Core/Inc/remote_to_motion.h
+dcar_opensource\main.o: ../Core/Inc/uart4_debug.h

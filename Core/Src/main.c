@@ -26,6 +26,8 @@
 /* USER CODE BEGIN Includes */
 #include "motor_control.h"
 #include "ps2_receiver.h"
+#include "remote_to_motion.h"
+#include "uart4_debug.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -46,7 +48,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+#define REMOTE_UPDATE_MS   10   /* SBUS 遥控更新周期 (ms) */
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -105,19 +107,43 @@ int main(void)
   /* PS2 遥控器接收模块初始化 (PA3) */
   PS2_Receiver_Init();
 
-  /* 设置 M1~M4 目标线速度：100 mm/s 同向中速 (DF 参数见 encoder.h) */
-  MotorControl_SetAllTargetSpeedMMps(500.0f, 500.0f, 500.0f, 500.0f);
+  /* 遥控转运动模块初始化 */
+  RemoteToMotion_Init();
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  uint32_t last_remote_tick = HAL_GetTick();
+  uint8_t remote_mode_enabled = 0;   /* 默认上电时遥控模式关闭 */
   while (1)
   {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-		HAL_GPIO_WritePin(LED0_GPIO_Port,LED0_Pin,0);
+    /* 非中断方式每 10ms 更新一次 SBUS 遥控数据 */
+    if ((HAL_GetTick() - last_remote_tick) >= REMOTE_UPDATE_MS) {
+      last_remote_tick = HAL_GetTick();
+
+      /* 检测 O 键: SBUS CH6 (channels[5]) 550~650 按下 */
+      PS2_Data_TypeDef data;
+      PS2_Receiver_GetData(&data);
+
+      /* UART4 发送 PS2 摇杆四通道数据 (lx,ly,rx,ry) 供波形显示工具查看 */
+      UART4_Debug_SendPS2Joystick(data.lx, data.ly, data.rx, data.ry);
+
+      if (data.ch6 >= 550 && data.ch6 <= 650) {
+        remote_mode_enabled = 1;
+      }
+
+      if (remote_mode_enabled) {
+        RemoteToMotion_Update();
+        HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin, GPIO_PIN_RESET); /* 遥控模式: LED0 亮 (低电平点亮) */
+      } else {
+        MotorControl_StopAll();
+        HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin, GPIO_PIN_SET);   /* 遥控关闭: LED0 灭 */
+      }
+    }
   }
   /* USER CODE END 3 */
 }

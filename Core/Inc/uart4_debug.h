@@ -14,15 +14,14 @@ extern "C" {
 #include "main.h"
 
 /**
-  * @brief  发送 M1 电机 PID 波形数据 (每 10ms 调用一次)
-  * @param  target_speed: 目标 (脉冲/10ms)
-  * @param  current_speed: 实际 (脉冲/10ms)
-  * @param  error: 误差 (target - current)
-  * @param  pwm_output: PID 输出 (PWM 值)
-  * @note   字符串格式: "target,current,error,pwm\n" (CSV)
+  * @brief  发送 PS2 摇杆四通道数据 (lx, ly, rx, ry)
+  * @param  lx: 左摇杆 X 轴 (0~2047)
+  * @param  ly: 左摇杆 Y 轴 (0~2047)
+  * @param  rx: 右摇杆 X 轴 (0~2047)
+  * @param  ry: 右摇杆 Y 轴 (0~2047)
+  * @note   字符串格式: "lx,ly,rx,ry\n" (CSV)，供波形显示工具解析
   */
-void UART4_Debug_SendWaveform(float target_speed, float current_speed,
-                              float error, float pwm_output);
+void UART4_Debug_SendPS2Joystick(uint16_t lx, uint16_t ly, uint16_t rx, uint16_t ry);
 
 #ifdef __cplusplus
 }
