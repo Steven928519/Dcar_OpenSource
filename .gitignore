@@ -11,9 +11,9 @@ Release/
 # IDE 文件
 .vscode/
 .idea/
-*.uvprojx
+# *.uvprojx
 *.uvoptx
-*.uvguix
+*.uvguix*
 *.ewp
 *.eww
 *.launch
