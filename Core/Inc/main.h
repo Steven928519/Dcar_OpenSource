@@ -67,6 +67,8 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define LED0_Pin GPIO_PIN_5
 #define LED0_GPIO_Port GPIOE
+#define CS_ICM_Pin GPIO_PIN_8
+#define CS_ICM_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
 /* 电机方向控制引脚 - 放在此处 CubeMX 重新生成不会删除 */
