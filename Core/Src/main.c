@@ -26,6 +26,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "imu.h"
+#include "loop.h"
 #include "motor_control.h"
 #include "ps2_receiver.h"
 #include "remote_to_motion.h"
@@ -51,7 +52,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-#define REMOTE_UPDATE_MS 10 /* SBUS 遥控更新周期 (ms) */
+/* (分频参数已迁移至 loop.c) */
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -116,66 +117,24 @@ int main(void) {
 
   /* ICM20602 通信检查测试 */
   if (ICM20602_Check()) {
-    HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin,
-                      GPIO_PIN_RESET); /* 通信正常：LED0 亮 */
+    /* 通信正常：LED0 亮 */
+    HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin, GPIO_PIN_RESET);
   } else {
-    HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin,
-                      GPIO_PIN_SET); /* 通信失败：LED0 灭 */
+    /* 通信失败：LED0 灭 (或者可以在这里添加报错提示) */
+    HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin, GPIO_PIN_SET);
   }
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  uint32_t last_remote_tick = HAL_GetTick();
-  uint8_t remote_mode_enabled = 0; /* 默认上电时遥控模式关闭 */
-
-  ICM20602_Data_TypeDef imu_raw;
-  ICM20602_Attitude_TypeDef imu_angles = {0};
-  IMU_InitState_t imu_status;
-  uint32_t last_imu_tick = HAL_GetTick();
-
   while (1) {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-
-    /* 1. 非阻塞式 IMU 初始化与固定频率姿态计算 */
-    imu_status = ICM20602_Init_NonBlocking();
-    if (imu_status == IMU_STATE_READY) {
-      /* 1ms 采样一次，匹配 Mahony 滤波器 halfT */
-      if (HAL_GetTick() - last_imu_tick >= 1) {
-        last_imu_tick = HAL_GetTick();
-        ICM20602_ReadData(&imu_raw);
-        ICM20602_UpdateAttitude(&imu_raw, &imu_angles);
-        UART4_Debug_SendIMUData(&imu_angles); /* VOFA+ 输出欧拉角 */
-      }
-    }
-
-    /* 2. 非中断方式每 10ms 更新一次运动控制 */
-    if ((HAL_GetTick() - last_remote_tick) >= REMOTE_UPDATE_MS) {
-      last_remote_tick = HAL_GetTick();
-
-      if (imu_status == IMU_STATE_READY) {
-        PS2_Data_TypeDef data;
-        PS2_Receiver_GetData(&data);
-
-        /* CH6 按下时开启遥控移动模式 */
-        if (data.ch6 >= 550 && data.ch6 <= 650) {
-          remote_mode_enabled = 1;
-        }
-
-        RemoteToMotion_Update(imu_angles.yaw, remote_mode_enabled);
-
-        /* 遥控模式开启则 LED 亮，否则灭 */
-        HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin,
-                          remote_mode_enabled ? GPIO_PIN_RESET : GPIO_PIN_SET);
-      } else {
-        /* IMU 未就绪时强制停止电机 */
-        MotorControl_StopAll();
-        HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin, GPIO_PIN_SET);
-      }
-    }
+    /* 任务分频调度：1kHz IMU | 100Hz 运动控制 | 50Hz 调试输出 */
+    /* 详见 Core/Src/loop.c */
+    Loop_Run();
   }
   /* USER CODE END 3 */
 }

@@ -39,8 +39,8 @@ static void Motion_Decouple(float Vy, float Vx, float w) {
 }
 
 void RemoteToMotion_Init(void) {
-  /* Yaw PID: Kp=60, Ki=0, Kd=5.0, 输出限幅 ±800 mm/s */
-  PID_Init(&yaw_pid, 60.0f, 0.0f, 5.0f, 800.0f, -800.0f);
+  /* Yaw PID: Kp=60, Ki=0, Kd=0.0, 输出限幅 ±800 mm/s */
+  PID_Init(&yaw_pid, 60.0f, 0.7f, 0.0f, 800.0f, -800.0f);
 
   /* 初始静止 */
   MotorControl_SetAllTargetSpeedMMps(0.0f, 0.0f, 0.0f, 0.0f);
@@ -76,14 +76,8 @@ void RemoteToMotion_Update(float current_yaw, uint8_t is_remote_enabled) {
       PID_Reset(&yaw_pid);
     }
 
-    /* 偏差在 ±1.5° 以内时停止纠偏，规避电机低压啸叫 */
-    float yaw_error = target_yaw - current_yaw;
-    if (yaw_error > -1.5f && yaw_error < 1.5f) {
-      w = 0.0f;
-      PID_Reset(&yaw_pid);
-    } else {
-      w = PID_Calc(&yaw_pid, target_yaw, current_yaw);
-    }
+    /* 无死区：全程由 PID 持续纠偏 */
+    w = PID_Calc(&yaw_pid, target_yaw, current_yaw);
   }
 
   /* 最终解耦并下发到电机 */
