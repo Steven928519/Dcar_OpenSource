@@ -68,6 +68,7 @@ Core/Src/ps2_receiver.c \
 Core/Src/remote_to_motion.c \
 Core/Src/uart4_debug.c \
 Core/Src/imu.c \
+Core/Src/loop.c \
 Core/Src/spi.c \
 Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.c
 
