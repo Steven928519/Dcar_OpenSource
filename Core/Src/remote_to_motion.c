@@ -39,7 +39,7 @@ static void Motion_Decouple(float Vy, float Vx, float w) {
 }
 
 void RemoteToMotion_Init(void) {
-  /* Yaw PID: Kp=60, Ki=0, Kd=0.0, 输出限幅 ±800 mm/s */
+  /* Yaw PID: Kp=60, Ki=0.7, Kd=0.0, 输出限幅 ±800 mm/s */
   PID_Init(&yaw_pid, 60.0f, 0.7f, 0.0f, 800.0f, -800.0f);
 
   /* 初始静止 */

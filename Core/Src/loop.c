@@ -25,6 +25,7 @@
 #include "ps2_receiver.h"
 #include "remote_to_motion.h"
 #include "uart4_debug.h"
+#include "usart1_control.h"
 
 /* -------------------------------------------------------------------------- */
 /* 模块内共享状态 */
@@ -47,23 +48,39 @@ static void LOOP_1000HZ(void) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* 100 Hz — 遥控模式判断 + Yaw PID + 运动解耦                                 */
+/* 100 Hz — 遥控/串口模式判断 + Yaw PID + 运动解耦                            */
 /* -------------------------------------------------------------------------- */
 static void LOOP_100HZ(void) {
   if (imu_status == IMU_STATE_READY) {
-    PS2_Data_TypeDef data;
-    PS2_Receiver_GetData(&data);
+    Uart1_ControlCmd_t uart_cmd;
+    Uart1_Control_GetLatestCmd(&uart_cmd);
 
-    /* CH6 拨杆居中时开启遥控移动模式 */
-    if (data.ch6 >= 550 && data.ch6 <= 650) {
-      remote_mode_enabled = 1;
+    /* 串口有效命令优先：直接解耦下发到电机 (默认串口模式，LED 灭) */
+    if (uart_cmd.valid) {
+      float Vy = uart_cmd.vy_mmps;
+      float Vx = uart_cmd.vx_mmps;
+      float w  = uart_cmd.w_mmps;
+      /* 电机物理位置: s1=右前, s2=右后, s3=左后, s4=左前 */
+      float s1 = Vy + Vx + w;
+      float s2 = Vy - Vx - w;
+      float s3 = Vy + Vx - w;
+      float s4 = Vy - Vx + w;
+      MotorControl_SetAllTargetSpeedMMps(s1, s2, s3, s4);
+      HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin, GPIO_PIN_SET); /* 串口模式 LED 灭 */
+    } else {
+      /* 无串口命令时走遥控逻辑 */
+      PS2_Data_TypeDef data;
+      PS2_Receiver_GetData(&data);
+
+      if (data.ch6 >= 550 && data.ch6 <= 650) {
+        remote_mode_enabled = 1;
+      }
+
+      RemoteToMotion_Update(imu_angles.yaw, remote_mode_enabled);
+
+      HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin,
+                        remote_mode_enabled ? GPIO_PIN_RESET : GPIO_PIN_SET);
     }
-
-    RemoteToMotion_Update(imu_angles.yaw, remote_mode_enabled);
-
-    /* 遥控模式开启 LED 亮，否则灭 */
-    HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin,
-                      remote_mode_enabled ? GPIO_PIN_RESET : GPIO_PIN_SET);
   } else {
     /* IMU 未就绪：强制停止电机并熄灭 LED */
     MotorControl_StopAll();
