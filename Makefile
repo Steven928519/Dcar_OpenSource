@@ -72,6 +72,8 @@ Core/Src/imu.c \
 Core/Src/loop.c \
 Core/Src/spi.c \
 Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.c \
+Core/Src/odometry.c \
+Core/Src/move_control.c \
 Core/Src/dma.c
 
 # ASM sources

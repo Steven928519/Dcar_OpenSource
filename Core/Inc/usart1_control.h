@@ -21,15 +21,39 @@ extern "C" {
 #include "main.h"
 
 /**
+ * @brief  串口指令类型
+ */
+typedef enum {
+  UART1_CMD_NONE = 0,
+  UART1_CMD_VELOCITY,    /* 0x67 持续速度控制 */
+  UART1_CMD_DISPLACEMENT /* 0x64 定点匀速位移 */
+} Uart1_CmdType_t;
+
+/**
  * @brief  串口控制命令结构体
  *         由 usart1_control.c 在收到完整一帧数据后填充
  */
 typedef struct {
-  float vx_mmps;   /* 车体 X 方向线速度 (mm/s)，正=右，负=左 */
-  float vy_mmps;   /* 车体 Y 方向线速度 (mm/s)，正=前，负=后 */
-  float w_mmps;    /* 车体旋转等效线速度 (mm/s)，正=顺时针 */
-  uint8_t valid;   /* 当前命令是否有效 (1=有效，0=无效或未更新) */
+  Uart1_CmdType_t type; /* 指令类型 */
+
+  /* 速度控制参数 (type == UART1_CMD_VELOCITY) */
+  float vx_mmps; /* 车体 X 方向线速度 (mm/s)，正=右，负=左 */
+  float vy_mmps; /* 车体 Y 方向线速度 (mm/s)，正=前，负=后 */
+  float w_mmps;  /* 车体旋转等效线速度 (mm/s)，正=顺时针 */
+
+  /* 位移控制参数 (type == UART1_CMD_DISPLACEMENT) */
+  float target_x_mm;       /* 相对 X 位移 (mm) */
+  float target_y_mm;       /* 相对 Y 位移 (mm) */
+  float target_z_mm;       /* 相对 Z 位移 (mm)，暂存为 0 */
+  float target_speed_mmps; /* 移动速度上限 (mm/s) */
+
+  uint8_t valid; /* 当前命令是否有效 (1=有效，0=无效或已过期) */
 } Uart1_ControlCmd_t;
+
+/**
+ * @brief  标记命令已处理，清除有效位
+ */
+void Uart1_Control_ClearCmd(void);
 
 /**
  * @brief  USART1 控制模块初始化
@@ -49,4 +73,3 @@ void Uart1_Control_GetLatestCmd(Uart1_ControlCmd_t *out);
 #endif
 
 #endif /* __USART1_CONTROL_H__ */
-
