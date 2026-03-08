@@ -48,6 +48,15 @@ void RemoteToMotion_Init(void);
  */
 void RemoteToMotion_Update(float current_yaw, uint8_t is_remote_enabled);
 
+/**
+ * @brief  处理手动运动指令 (含锁头逻辑)
+ * @param  vx: 车体 X 方向速度 (mm/s)
+ * @param  vy: 车体 Y 方向速度 (mm/s)
+ * @param  w:  旋转速度 (mm/s)，非 0 时会更新锁头目标
+ * @param  current_yaw: 当前航向角 (degree)
+ */
+void Motion_HandleManual(float vx, float vy, float w, float current_yaw);
+
 #ifdef __cplusplus
 }
 #endif

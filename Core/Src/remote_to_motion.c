@@ -2,6 +2,7 @@
 #include "motor_control.h"
 #include "pid.h"
 #include "ps2_receiver.h"
+#include <math.h>
 
 /* Yaw 轴锁定相关变量 */
 static PID_TypeDef yaw_pid;
@@ -48,22 +49,24 @@ void RemoteToMotion_Init(void) {
 
 void RemoteToMotion_Update(float current_yaw, uint8_t is_remote_enabled) {
   PS2_Data_TypeDef data;
-
   PS2_Receiver_GetData(&data);
 
   float Vy = 0.0f;
   float Vx = 0.0f;
   float w = 0.0f;
 
-  /* 只有在遥控模式开启且遥控器已连接时，才读取前后左右指令 */
   if (is_remote_enabled && data.connected) {
-    Vy = RawToSpeedWithDeadzone(data.ly); /* LY: 前后 */
-    Vx = RawToSpeedWithDeadzone(data.lx); /* LX: 左右 */
-    w = RawToSpeedWithDeadzone(data.rx);  /* RX: 旋转 */
+    Vy = RawToSpeedWithDeadzone(data.ly);
+    Vx = RawToSpeedWithDeadzone(data.lx);
+    w = RawToSpeedWithDeadzone(data.rx);
   }
 
+  Motion_HandleManual(Vx, Vy, w, current_yaw);
+}
+
+void Motion_HandleManual(float vx, float vy, float w, float current_yaw) {
   /* 锁头逻辑实现 (核心：只要没有手动旋转指令 w，就自动维持当前 yaw) */
-  if (w != 0.0f) {
+  if (fabsf(w) > 0.01f) {
     /* 用户手动主动转弯中，清除偏差状态 */
     is_yaw_locked = 0;
     target_yaw = current_yaw;
@@ -76,10 +79,15 @@ void RemoteToMotion_Update(float current_yaw, uint8_t is_remote_enabled) {
       PID_Reset(&yaw_pid);
     }
 
-    /* 无死区：全程由 PID 持续纠偏 */
-    w = PID_Calc(&yaw_pid, target_yaw, current_yaw);
+    /* 死区：减小电机在极其细微误差下的啸叫 */
+    float yaw_error = target_yaw - current_yaw;
+    if (fabsf(yaw_error) < 0.05f) {
+      w = 0.0f;
+    } else {
+      w = PID_Calc(&yaw_pid, target_yaw, current_yaw);
+    }
   }
 
   /* 最终解耦并下发到电机 */
-  Motion_Decouple(Vy, Vx, w);
+  Motion_Decouple(vy, vx, w);
 }
