@@ -38,6 +38,7 @@
 
 #include "usart1_control.h"
 #include "usart.h"
+#include <stdint.h>
 #include <string.h>
 
 /* USART1 DMA 接收缓冲区配置: 存放 HAL DMA+IDLE 收到的原始字节流 */
@@ -47,7 +48,7 @@
 static uint8_t s_frame_buf[UART1_RX_BUF_SIZE * 2];
 static uint16_t s_frame_len = 0;
 
-/* 协议常量 (当前仅实现: 匀速移动指令 A=0x02/B=0x67) */
+/* 协议常量 */
 #define UART1_FRAME_HEAD 0xDF
 #define UART1_FRAME_TAIL 0xFD
 
@@ -55,13 +56,20 @@ static uint16_t s_frame_len = 0;
 #define UART1_ADDR_PC 0x97
 
 #define UART1_TYPE_A_MOVE 0x02
-#define UART1_TYPE_B_MOVE 0x67
+#define UART1_TYPE_B_VELOCITY 0x67     /* 持续速度控制 */
+#define UART1_TYPE_B_DISPLACEMENT 0x68 /* 相对位移控制 */
 
-#define UART1_DATA_LEN_MOVE 0x06
+#define UART1_DATA_LEN_VELOCITY 0x06
+#define UART1_DATA_LEN_DISPLACEMENT 0x06
 
-#define UART1_FRAME_LEN_MOVE                                                   \
+#define UART1_FRAME_LEN_VELOCITY                                               \
   (1U /* head */ + 1U /* dst */ + 1U /* src */ + 2U /* typeA/typeB */ +        \
-   1U /* len */ + UART1_DATA_LEN_MOVE /* payload */ + 1U /* tail */ +          \
+   1U /* len */ + UART1_DATA_LEN_VELOCITY /* payload */ + 1U /* tail */ +      \
+   1U /* checksum */)
+
+#define UART1_FRAME_LEN_DISPLACEMENT                                           \
+  (1U /* head */ + 1U /* dst */ + 1U /* src */ + 2U /* typeA/typeB */ +        \
+   1U /* len */ + UART1_DATA_LEN_DISPLACEMENT /* payload */ + 1U /* tail */ +  \
    1U /* checksum */)
 
 /* 速度缩放: 协议中 S16 一位对应多少 mm/s (由上位机约定) */
@@ -80,38 +88,29 @@ static int16_t BytesToS16LE(uint8_t low, uint8_t high) {
   return (int16_t)((uint16_t)low | ((uint16_t)high << 8));
 }
 
-/* 尝试将 buf 指向的一帧“匀速移动命令”解析为 Uart1_ControlCmd_t
- * 返回值: 1=解析成功并更新 s_latest_cmd, 0=解析失败
+/**
+ * @brief 尝试解析速度控制帧并更新全局指令
+ * @return 1=成功, 0=失败
  */
-static uint8_t ParseMoveFrameAndUpdateCmd(const uint8_t *buf, uint16_t size) {
-  if (size != (uint16_t)UART1_FRAME_LEN_MOVE) {
+static uint8_t ParseVelocityFrame(const uint8_t *buf, uint16_t size) {
+  if (size != (uint16_t)UART1_FRAME_LEN_VELOCITY) {
     return 0U;
   }
-
   if (buf[0] != UART1_FRAME_HEAD || buf[12] != UART1_FRAME_TAIL) {
     return 0U;
   }
-
-  const uint8_t dst = buf[1];
-  const uint8_t src = buf[2];
-  if (dst != UART1_ADDR_MCU || src != UART1_ADDR_PC) {
+  if (buf[1] != UART1_ADDR_MCU || buf[2] != UART1_ADDR_PC) {
+    return 0U;
+  }
+  if (buf[3] != UART1_TYPE_A_MOVE || buf[4] != UART1_TYPE_B_VELOCITY) {
+    return 0U;
+  }
+  if (buf[5] != UART1_DATA_LEN_VELOCITY) {
     return 0U;
   }
 
-  const uint8_t typeA = buf[3];
-  const uint8_t typeB = buf[4];
-  if (typeA != UART1_TYPE_A_MOVE || typeB != UART1_TYPE_B_MOVE) {
-    return 0U;
-  }
-
-  const uint8_t data_len = buf[5];
-  if (data_len != UART1_DATA_LEN_MOVE) {
-    return 0U;
-  }
-
-  /* 按累加和规则校验: 从帧头到帧尾(含)逐字节求和, 结果应等于校验字节 */
   uint8_t sum = 0U;
-  for (uint8_t i = 0; i <= 12; i++) { /* 从帧头到帧尾 (含) */
+  for (uint8_t i = 0; i <= 12; i++) {
     sum = (uint8_t)(sum + buf[i]);
   }
   if (sum != buf[13]) {
@@ -123,40 +122,31 @@ static uint8_t ParseMoveFrameAndUpdateCmd(const uint8_t *buf, uint16_t size) {
   const int16_t w_raw = BytesToS16LE(buf[10], buf[11]);
 
   Uart1_ControlCmd_t cmd;
-  /* 将协议中的 S16 原始值按比例换算为物理速度 (mm/s) */
   cmd.vx_mmps = (float)vx_raw * UART1_SPEED_SCALE_MMPS_PER_LSB;
   cmd.vy_mmps = (float)vy_raw * UART1_SPEED_SCALE_MMPS_PER_LSB;
   cmd.w_mmps = (float)w_raw * UART1_SPEED_SCALE_MMPS_PER_LSB;
   cmd.valid = 1U;
+  cmd.type = UART1_CMD_VELOCITY;
 
   s_latest_cmd = cmd;
   return 1U;
 }
 
 void Uart1_Control_Init(void) {
-  /* 初始化最近命令为无效状态 */
   s_latest_cmd.vx_mmps = 0.0f;
   s_latest_cmd.vy_mmps = 0.0f;
   s_latest_cmd.w_mmps = 0.0f;
   s_latest_cmd.valid = 0U;
 
-  /* 启动 USART1 的 DMA+IDLE 接收
-   * - huart1: 来自 usart.c 的 UART1 句柄
-   * - s_uart1_rx_buf: DMA 接收缓冲区
-   * - UART1_RX_BUF_SIZE: 最大接收长度
-   */
   HAL_UARTEx_ReceiveToIdle_DMA(&huart1, s_uart1_rx_buf, UART1_RX_BUF_SIZE);
-  /* 关闭半传输中断，避免产生过多中断回调 */
   if (huart1.hdmarx != NULL) {
     __HAL_DMA_DISABLE_IT(huart1.hdmarx, DMA_IT_HT);
   }
 }
 
 void Uart1_Control_GetLatestCmd(Uart1_ControlCmd_t *out) {
-  if (out == NULL) {
+  if (out == NULL)
     return;
-  }
-  /* 简单的“临界区”: 复制结构体时短暂关中断, 防止中断同时修改 s_latest_cmd */
   __disable_irq();
   *out = (Uart1_ControlCmd_t)s_latest_cmd;
   __enable_irq();
@@ -167,22 +157,20 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
     return;
   }
 
-  /* 1. 将本次收到的散碎数据追加到持久化缓存中 */
+  /* 1. 将本次收到的数据追加到持久缓存 */
   for (uint16_t i = 0; i < Size; i++) {
     if (s_frame_len < sizeof(s_frame_buf)) {
       s_frame_buf[s_frame_len++] = s_uart1_rx_buf[i];
     } else {
-      /* 如果缓存满了（极少出现），挤掉最老的一字节 */
       memmove(s_frame_buf, s_frame_buf + 1, sizeof(s_frame_buf) - 1);
       s_frame_buf[sizeof(s_frame_buf) - 1] = s_uart1_rx_buf[i];
     }
   }
 
-  /* 2. 尝试在持久缓存中寻找并解析所有完整的控制帧 */
-  while (s_frame_len >= UART1_FRAME_LEN_MOVE) {
+  /* 2. 循环解析缓存中的数据 */
+  while (s_frame_len >= UART1_FRAME_LEN_VELOCITY) {
     uint16_t head_idx = 0xFFFF;
-    /* 遍历寻找帧头 */
-    for (uint16_t i = 0; i <= s_frame_len - UART1_FRAME_LEN_MOVE; i++) {
+    for (uint16_t i = 0; i <= s_frame_len - UART1_FRAME_LEN_VELOCITY; i++) {
       if (s_frame_buf[i] == UART1_FRAME_HEAD) {
         head_idx = i;
         break;
@@ -190,35 +178,24 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
     }
 
     if (head_idx != 0xFFFF) {
-      /* 找到了数据包头部，尝试解析 */
-      if (ParseMoveFrameAndUpdateCmd(&s_frame_buf[head_idx],
-                                     (uint16_t)UART1_FRAME_LEN_MOVE)) {
+      if (ParseVelocityFrame(&s_frame_buf[head_idx], UART1_FRAME_LEN_VELOCITY)) {
         const uint8_t ack = 0x43U;
         (void)HAL_UART_Transmit(&huart1, (uint8_t *)&ack, 1, 10);
-        
-        /* 成功解析一帧后，把这帧连同它前面的无关字节全部删除 */
-        uint16_t remove_len = head_idx + UART1_FRAME_LEN_MOVE;
+        uint16_t remove_len = head_idx + UART1_FRAME_LEN_VELOCITY;
         memmove(s_frame_buf, s_frame_buf + remove_len, s_frame_len - remove_len);
         s_frame_len -= remove_len;
       } else {
-        /* 如果帧头检查不过关(比如校验和错)，说明这是一个"伪帧头" */
-        /* 删除这个伪帧头字节，从下一个字节继续开始找 */
         memmove(s_frame_buf, s_frame_buf + head_idx + 1, s_frame_len - head_idx - 1);
         s_frame_len -= (head_idx + 1);
       }
     } else {
-      /* 如果整个能够构成完整长度的区域都没找到有效的帧头，
-       * 说明缓存前部全是无用垃圾。只保留末尾 (帧长度 - 1) 个字节，
-       * 因为真正帧头可能被截断在那里。
-       */
-      uint16_t remove_len = s_frame_len - UART1_FRAME_LEN_MOVE + 1;
+      uint16_t remove_len = s_frame_len - UART1_FRAME_LEN_VELOCITY + 1;
       memmove(s_frame_buf, s_frame_buf + remove_len, s_frame_len - remove_len);
       s_frame_len -= remove_len;
-      break; /* 退出 while 解析，等待新数据 */
+      break;
     }
   }
 
-  /* 3. 重新启动 DMA+IDLE 接收 */
   HAL_UARTEx_ReceiveToIdle_DMA(&huart1, s_uart1_rx_buf, UART1_RX_BUF_SIZE);
   if (huart1.hdmarx != NULL) {
     __HAL_DMA_DISABLE_IT(huart1.hdmarx, DMA_IT_HT);
