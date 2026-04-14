@@ -38,9 +38,14 @@
 
 #include "usart1_control.h"
 #include "usart.h"
+#include <string.h>
 
 /* USART1 DMA 接收缓冲区配置: 存放 HAL DMA+IDLE 收到的原始字节流 */
 #define UART1_RX_BUF_SIZE 128
+
+/* 持久化缓存: 防止无线透传时的断帧分包丢数据 */
+static uint8_t s_frame_buf[UART1_RX_BUF_SIZE * 2];
+static uint16_t s_frame_len = 0;
 
 /* 协议常量 (当前仅实现: 匀速移动指令 A=0x02/B=0x67) */
 #define UART1_FRAME_HEAD 0xDF
@@ -158,31 +163,62 @@ void Uart1_Control_GetLatestCmd(Uart1_ControlCmd_t *out) {
 }
 
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
-  if (huart == NULL) {
-    return;
-  }
-  if (huart->Instance != USART1) {
+  if (huart == NULL || huart->Instance != USART1) {
     return;
   }
 
-  /* 尝试在本次数据块中寻找并解析控制帧
-   * 允许前面有噪声或一次收到多帧：匹配到的帧都会更新 s_latest_cmd，最后一帧生效
-   * 每次解析成功则回传 0x43 作为应答
-   */
-  if (Size >= UART1_FRAME_LEN_MOVE) {
-    const uint16_t max_i = (uint16_t)(Size - UART1_FRAME_LEN_MOVE);
-    for (uint16_t i = 0; i <= max_i; i++) {
-      if (s_uart1_rx_buf[i] == UART1_FRAME_HEAD) {
-        if (ParseMoveFrameAndUpdateCmd(&s_uart1_rx_buf[i],
-                                       (uint16_t)UART1_FRAME_LEN_MOVE)) {
-          const uint8_t ack = 0x43U;
-          (void)HAL_UART_Transmit(&huart1, (uint8_t *)&ack, 1, 10);
-        }
-      }
+  /* 1. 将本次收到的散碎数据追加到持久化缓存中 */
+  for (uint16_t i = 0; i < Size; i++) {
+    if (s_frame_len < sizeof(s_frame_buf)) {
+      s_frame_buf[s_frame_len++] = s_uart1_rx_buf[i];
+    } else {
+      /* 如果缓存满了（极少出现），挤掉最老的一字节 */
+      memmove(s_frame_buf, s_frame_buf + 1, sizeof(s_frame_buf) - 1);
+      s_frame_buf[sizeof(s_frame_buf) - 1] = s_uart1_rx_buf[i];
     }
   }
 
-  /* 重新启动 DMA+IDLE 接收 */
+  /* 2. 尝试在持久缓存中寻找并解析所有完整的控制帧 */
+  while (s_frame_len >= UART1_FRAME_LEN_MOVE) {
+    uint16_t head_idx = 0xFFFF;
+    /* 遍历寻找帧头 */
+    for (uint16_t i = 0; i <= s_frame_len - UART1_FRAME_LEN_MOVE; i++) {
+      if (s_frame_buf[i] == UART1_FRAME_HEAD) {
+        head_idx = i;
+        break;
+      }
+    }
+
+    if (head_idx != 0xFFFF) {
+      /* 找到了数据包头部，尝试解析 */
+      if (ParseMoveFrameAndUpdateCmd(&s_frame_buf[head_idx],
+                                     (uint16_t)UART1_FRAME_LEN_MOVE)) {
+        const uint8_t ack = 0x43U;
+        (void)HAL_UART_Transmit(&huart1, (uint8_t *)&ack, 1, 10);
+        
+        /* 成功解析一帧后，把这帧连同它前面的无关字节全部删除 */
+        uint16_t remove_len = head_idx + UART1_FRAME_LEN_MOVE;
+        memmove(s_frame_buf, s_frame_buf + remove_len, s_frame_len - remove_len);
+        s_frame_len -= remove_len;
+      } else {
+        /* 如果帧头检查不过关(比如校验和错)，说明这是一个"伪帧头" */
+        /* 删除这个伪帧头字节，从下一个字节继续开始找 */
+        memmove(s_frame_buf, s_frame_buf + head_idx + 1, s_frame_len - head_idx - 1);
+        s_frame_len -= (head_idx + 1);
+      }
+    } else {
+      /* 如果整个能够构成完整长度的区域都没找到有效的帧头，
+       * 说明缓存前部全是无用垃圾。只保留末尾 (帧长度 - 1) 个字节，
+       * 因为真正帧头可能被截断在那里。
+       */
+      uint16_t remove_len = s_frame_len - UART1_FRAME_LEN_MOVE + 1;
+      memmove(s_frame_buf, s_frame_buf + remove_len, s_frame_len - remove_len);
+      s_frame_len -= remove_len;
+      break; /* 退出 while 解析，等待新数据 */
+    }
+  }
+
+  /* 3. 重新启动 DMA+IDLE 接收 */
   HAL_UARTEx_ReceiveToIdle_DMA(&huart1, s_uart1_rx_buf, UART1_RX_BUF_SIZE);
   if (huart1.hdmarx != NULL) {
     __HAL_DMA_DISABLE_IT(huart1.hdmarx, DMA_IT_HT);
