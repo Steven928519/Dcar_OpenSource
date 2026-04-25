@@ -9,6 +9,7 @@
 #include "gpio.h"
 #include "pid.h"
 #include "tim.h"
+#include <math.h>
 
 /* 电机方向引脚: IN1_Pin, IN2_Pin */
 static const uint16_t motor_in1_pin[] = {AIN1_Pin, BIN1_Pin, CIN1_Pin,
@@ -29,31 +30,11 @@ static PID_TypeDef motor_pid[4];
 /* 速度(脉冲/秒) -> 每周期脉冲(脉冲/10ms): 除以 100 */
 #define SPEED_TO_DELTA(s) ((s) / 100.0f)
 
-/* 设置电机 PWM 占空比 (0~MOTOR_PWM_PERIOD)，并控制方向 */
-static void Motor_SetPWM(uint8_t motor_id, int16_t pwm_val) {
-  if (motor_id >= 4)
-    return;
+#define MOTOR_PWM_DEADZONE 60
+#define MOTOR_TARGET_STOP_DEADBAND (COUNTS_PER_MM * 3.0f)
+#define MOTOR_SPEED_STOP_DEADBAND 300.0f
 
-  pwm_val *= MOTOR_DIR_INVERT(motor_id);
-
-  uint16_t pwm_abs;
-  /* PWM 输出死区：绝对值 < 20 时置 0，防止电机低压啸叫 */
-  if (pwm_val > -200 && pwm_val < 200) {
-    pwm_val = 0;
-  }
-
-  if (pwm_val >= 0) {
-    pwm_abs =
-        (pwm_val > MOTOR_PWM_PERIOD) ? MOTOR_PWM_PERIOD : (uint16_t)pwm_val;
-    HAL_GPIO_WritePin(motor_gpio_port, motor_in1_pin[motor_id], GPIO_PIN_SET);
-    HAL_GPIO_WritePin(motor_gpio_port, motor_in2_pin[motor_id], GPIO_PIN_RESET);
-  } else {
-    pwm_abs =
-        (-pwm_val > MOTOR_PWM_PERIOD) ? MOTOR_PWM_PERIOD : (uint16_t)(-pwm_val);
-    HAL_GPIO_WritePin(motor_gpio_port, motor_in1_pin[motor_id], GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(motor_gpio_port, motor_in2_pin[motor_id], GPIO_PIN_SET);
-  }
-
+static void Motor_SetCompare(uint8_t motor_id, uint16_t pwm_abs) {
   switch (motor_id) {
   case 0:
     __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_1, pwm_abs);
@@ -70,6 +51,44 @@ static void Motor_SetPWM(uint8_t motor_id, int16_t pwm_val) {
   default:
     break;
   }
+}
+
+static void Motor_Coast(uint8_t motor_id) {
+  if (motor_id >= 4)
+    return;
+
+  Motor_SetCompare(motor_id, 0);
+  HAL_GPIO_WritePin(motor_gpio_port, motor_in1_pin[motor_id], GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(motor_gpio_port, motor_in2_pin[motor_id], GPIO_PIN_RESET);
+}
+
+/* 设置电机 PWM 占空比 (0~MOTOR_PWM_PERIOD)，并控制方向 */
+static void Motor_SetPWM(uint8_t motor_id, int16_t pwm_val) {
+  if (motor_id >= 4)
+    return;
+
+  pwm_val *= MOTOR_DIR_INVERT(motor_id);
+
+  uint16_t pwm_abs;
+  /* PWM 输出死区：小占空比直接空载，防止低压啸叫 */
+  if (pwm_val > -MOTOR_PWM_DEADZONE && pwm_val < MOTOR_PWM_DEADZONE) {
+    Motor_Coast(motor_id);
+    return;
+  }
+
+  if (pwm_val >= 0) {
+    pwm_abs =
+        (pwm_val > MOTOR_PWM_PERIOD) ? MOTOR_PWM_PERIOD : (uint16_t)pwm_val;
+    HAL_GPIO_WritePin(motor_gpio_port, motor_in1_pin[motor_id], GPIO_PIN_SET);
+    HAL_GPIO_WritePin(motor_gpio_port, motor_in2_pin[motor_id], GPIO_PIN_RESET);
+  } else {
+    pwm_abs =
+        (-pwm_val > MOTOR_PWM_PERIOD) ? MOTOR_PWM_PERIOD : (uint16_t)(-pwm_val);
+    HAL_GPIO_WritePin(motor_gpio_port, motor_in1_pin[motor_id], GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(motor_gpio_port, motor_in2_pin[motor_id], GPIO_PIN_SET);
+  }
+
+  Motor_SetCompare(motor_id, pwm_abs);
 }
 
 void MotorControl_Init(void) {
@@ -90,6 +109,7 @@ void MotorControl_Init(void) {
              MOTOR_PID_KD_DEFAULT, (float)MOTOR_PWM_PERIOD,
              -(float)MOTOR_PWM_PERIOD);
     target_speed[i] = 0.0f;
+    Motor_Coast(i);
   }
 }
 
@@ -119,6 +139,13 @@ void MotorControl_Update(void) {
 
   for (uint8_t i = 0; i < 4; i++) {
     float current_speed = Encoder_GetSpeed(i) * MOTOR_DIR_INVERT(i);
+    if (fabsf(target_speed[i]) < MOTOR_TARGET_STOP_DEADBAND &&
+        fabsf(current_speed) < MOTOR_SPEED_STOP_DEADBAND) {
+      target_speed[i] = 0.0f;
+      PID_Reset(&motor_pid[i]);
+      Motor_Coast(i);
+      continue;
+    }
     /* 转为每周期脉冲 (脉冲/10ms)，与参考工程量纲一致 */
     float target_delta = SPEED_TO_DELTA(target_speed[i]);
     float current_delta = SPEED_TO_DELTA(current_speed);
@@ -138,7 +165,7 @@ void MotorControl_StopAll(void) {
   for (uint8_t i = 0; i < 4; i++) {
     target_speed[i] = 0.0f;
     PID_Reset(&motor_pid[i]);
-    Motor_SetPWM(i, 0);
+    Motor_Coast(i);
   }
 }
 
