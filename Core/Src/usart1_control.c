@@ -44,11 +44,7 @@
 /* USART1 DMA 接收缓冲区配置: 存放 HAL DMA+IDLE 收到的原始字节流 */
 #define UART1_RX_BUF_SIZE 128
 
-/* 持久化缓存: 防止无线透传时的断帧分包丢数据 */
-static uint8_t s_frame_buf[UART1_RX_BUF_SIZE * 2];
-static uint16_t s_frame_len = 0;
-
-/* 协议常量 */
+/* 协议常量 (当前仅实现: 匀速移动指令 A=0x02/B=0x67) */
 #define UART1_FRAME_HEAD 0xDF
 #define UART1_FRAME_TAIL 0xFD
 
@@ -57,10 +53,10 @@ static uint16_t s_frame_len = 0;
 
 #define UART1_TYPE_A_MOVE 0x02
 #define UART1_TYPE_B_VELOCITY 0x67     /* 持续速度控制 */
-#define UART1_TYPE_B_DISPLACEMENT 0x68 /* 相对位移控制 */
+#define UART1_TYPE_B_DISPLACEMENT 0x64 /* 定点匀速位移 */
 
 #define UART1_DATA_LEN_VELOCITY 0x06
-#define UART1_DATA_LEN_DISPLACEMENT 0x06
+#define UART1_DATA_LEN_DISPLACEMENT 14
 
 #define UART1_FRAME_LEN_VELOCITY                                               \
   (1U /* head */ + 1U /* dst */ + 1U /* src */ + 2U /* typeA/typeB */ +        \
@@ -88,114 +84,167 @@ static int16_t BytesToS16LE(uint8_t low, uint8_t high) {
   return (int16_t)((uint16_t)low | ((uint16_t)high << 8));
 }
 
-/**
- * @brief 尝试解析速度控制帧并更新全局指令
- * @return 1=成功, 0=失败
- */
+/* 将两个小端无符号字节组合成无符号 16 位整数 */
+static uint16_t BytesToU16LE(uint8_t low, uint8_t high) {
+  return (uint16_t)((uint16_t)low | ((uint16_t)high << 8));
+}
+
+/* 将四个小端字节组合成有符号 32 位整数 */
+static int32_t BytesToS32LE(const uint8_t *p) {
+  return (int32_t)((uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+                   ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24));
+}
+
+/* 尝试解析速度控制帧 (0x67) */
 static uint8_t ParseVelocityFrame(const uint8_t *buf, uint16_t size) {
-  if (size != (uint16_t)UART1_FRAME_LEN_VELOCITY) {
+  if (size != (uint16_t)UART1_FRAME_LEN_VELOCITY)
     return 0U;
-  }
-  if (buf[0] != UART1_FRAME_HEAD || buf[12] != UART1_FRAME_TAIL) {
+  if (buf[0] != UART1_FRAME_HEAD || buf[12] != UART1_FRAME_TAIL)
     return 0U;
-  }
-  if (buf[1] != UART1_ADDR_MCU || buf[2] != UART1_ADDR_PC) {
+  if (buf[1] != UART1_ADDR_MCU || buf[2] != UART1_ADDR_PC)
     return 0U;
-  }
-  if (buf[3] != UART1_TYPE_A_MOVE || buf[4] != UART1_TYPE_B_VELOCITY) {
+  if (buf[3] != UART1_TYPE_A_MOVE || buf[4] != UART1_TYPE_B_VELOCITY)
     return 0U;
-  }
-  if (buf[5] != UART1_DATA_LEN_VELOCITY) {
+  if (buf[5] != UART1_DATA_LEN_VELOCITY)
     return 0U;
-  }
 
   uint8_t sum = 0U;
-  for (uint8_t i = 0; i <= 12; i++) {
+  for (uint8_t i = 0; i <= 12; i++)
     sum = (uint8_t)(sum + buf[i]);
-  }
-  if (sum != buf[13]) {
+  if (sum != buf[13])
     return 0U;
-  }
 
-  const int16_t vx_raw = BytesToS16LE(buf[6], buf[7]);
-  const int16_t vy_raw = BytesToS16LE(buf[8], buf[9]);
-  const int16_t w_raw = BytesToS16LE(buf[10], buf[11]);
-
-  Uart1_ControlCmd_t cmd;
-  cmd.vx_mmps = (float)vx_raw * UART1_SPEED_SCALE_MMPS_PER_LSB;
-  cmd.vy_mmps = (float)vy_raw * UART1_SPEED_SCALE_MMPS_PER_LSB;
-  cmd.w_mmps = (float)w_raw * UART1_SPEED_SCALE_MMPS_PER_LSB;
-  cmd.valid = 1U;
+  Uart1_ControlCmd_t cmd = {0};
   cmd.type = UART1_CMD_VELOCITY;
+  cmd.vx_mmps =
+      (float)BytesToS16LE(buf[6], buf[7]) * UART1_SPEED_SCALE_MMPS_PER_LSB;
+  cmd.vy_mmps =
+      (float)BytesToS16LE(buf[8], buf[9]) * UART1_SPEED_SCALE_MMPS_PER_LSB;
+  cmd.w_mmps =
+      (float)BytesToS16LE(buf[10], buf[11]) * UART1_SPEED_SCALE_MMPS_PER_LSB;
+  cmd.valid = 1U;
+
+  s_latest_cmd = cmd;
+  return 1U;
+}
+
+/* 尝试解析位移控制帧 (0x64) */
+static uint8_t ParseDisplacementFrame(const uint8_t *buf, uint16_t size) {
+  if (size != (uint16_t)UART1_FRAME_LEN_DISPLACEMENT)
+    return 0U;
+  if (buf[0] != UART1_FRAME_HEAD || buf[20] != UART1_FRAME_TAIL)
+    return 0U;
+  if (buf[1] != UART1_ADDR_MCU || buf[2] != UART1_ADDR_PC)
+    return 0U;
+  if (buf[3] != UART1_TYPE_A_MOVE || buf[4] != UART1_TYPE_B_DISPLACEMENT)
+    return 0U;
+  if (buf[5] != UART1_DATA_LEN_DISPLACEMENT)
+    return 0U;
+
+  uint8_t sum = 0U;
+  for (uint8_t i = 0; i <= 20; i++)
+    sum = (uint8_t)(sum + buf[i]);
+  if (sum != buf[21])
+    return 0U;
+
+  Uart1_ControlCmd_t cmd = {0};
+  cmd.type = UART1_CMD_DISPLACEMENT;
+  /*
+   * 协议修正: 接收的是 S32 整数 (米 * 100,000)
+   * 目标单位是 mm: (int / 100,000) * 1,000 = int / 100
+   * 例如: 输入 0.2m -> 协议发送 20,000 (20 4E 00 00) -> 转换后为 200.0 mm
+   */
+  cmd.target_x_mm = (float)BytesToS32LE(&buf[6]) / 100.0f;
+  cmd.target_y_mm = (float)BytesToS32LE(&buf[10]) / 100.0f;
+  cmd.target_z_mm = (float)BytesToS32LE(&buf[14]) / 100.0f;
+
+  // 限速单位是 cm/s，放大 100 倍存入 U16，转换为 mm/s 需要: (raw / 100) * 10 =
+  // raw / 10
+  cmd.target_speed_mmps = (float)BytesToU16LE(buf[18], buf[19]) / 10.0f;
+  cmd.valid = 1U;
 
   s_latest_cmd = cmd;
   return 1U;
 }
 
 void Uart1_Control_Init(void) {
+  /* 初始化最近命令为无效状态 */
+  s_latest_cmd.type = UART1_CMD_NONE;
   s_latest_cmd.vx_mmps = 0.0f;
   s_latest_cmd.vy_mmps = 0.0f;
   s_latest_cmd.w_mmps = 0.0f;
   s_latest_cmd.valid = 0U;
 
+  /* 启动 USART1 的 DMA+IDLE 接收
+   * - huart1: 来自 usart.c 的 UART1 句柄
+   * - s_uart1_rx_buf: DMA 接收缓冲区
+   * - UART1_RX_BUF_SIZE: 最大接收长度
+   */
   HAL_UARTEx_ReceiveToIdle_DMA(&huart1, s_uart1_rx_buf, UART1_RX_BUF_SIZE);
+  /* 关闭半传输中断，避免产生过多中断回调 */
   if (huart1.hdmarx != NULL) {
     __HAL_DMA_DISABLE_IT(huart1.hdmarx, DMA_IT_HT);
   }
 }
 
 void Uart1_Control_GetLatestCmd(Uart1_ControlCmd_t *out) {
-  if (out == NULL)
+  if (out == NULL) {
     return;
+  }
+  /* 简单的“临界区”: 复制结构体时短暂关中断, 防止中断同时修改 s_latest_cmd */
   __disable_irq();
-  *out = (Uart1_ControlCmd_t)s_latest_cmd;
+//  *out = (Uart1_ControlCmd_t)s_latest_cmd;
+  __enable_irq();
+}
+
+void Uart1_Control_ClearCmd(void) {
+  __disable_irq();
+  s_latest_cmd.valid = 0U;
+  s_latest_cmd.type = UART1_CMD_NONE;
   __enable_irq();
 }
 
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
-  if (huart == NULL || huart->Instance != USART1) {
+  /* 调试：翻转 LED 确认回调被调用 */
+  HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+  
+  if (huart == NULL) {
+    return;
+  }
+  if (huart->Instance != USART1) {
     return;
   }
 
-  /* 1. 将本次收到的数据追加到持久缓存 */
-  for (uint16_t i = 0; i < Size; i++) {
-    if (s_frame_len < sizeof(s_frame_buf)) {
-      s_frame_buf[s_frame_len++] = s_uart1_rx_buf[i];
-    } else {
-      memmove(s_frame_buf, s_frame_buf + 1, sizeof(s_frame_buf) - 1);
-      s_frame_buf[sizeof(s_frame_buf) - 1] = s_uart1_rx_buf[i];
+  /* 尝试在本次数据块中寻找并解析控制帧
+   * 允许前面有噪声或一次收到多帧：匹配到的帧都会更新 s_latest_cmd，最后一帧生效
+   * 每次解析成功则回传 0x43 作为应答
+   */
+  /* 尝试在本次数据块中寻找并解析控制帧 */
+  if (Size >= UART1_FRAME_LEN_VELOCITY) {
+    for (uint16_t i = 0; i <= Size - 14; i++) {
+      if (s_uart1_rx_buf[i] == UART1_FRAME_HEAD) {
+        if (ParseVelocityFrame(&s_uart1_rx_buf[i], UART1_FRAME_LEN_VELOCITY)) {
+          const uint8_t ack = 0x43U;
+          HAL_UART_Transmit(&huart1, (uint8_t *)&ack, 1, 10);
+        }
+      }
     }
   }
 
-  /* 2. 循环解析缓存中的数据 */
-  while (s_frame_len >= UART1_FRAME_LEN_VELOCITY) {
-    uint16_t head_idx = 0xFFFF;
-    for (uint16_t i = 0; i <= s_frame_len - UART1_FRAME_LEN_VELOCITY; i++) {
-      if (s_frame_buf[i] == UART1_FRAME_HEAD) {
-        head_idx = i;
-        break;
+  /* 寻找位移帧 (0x64) */
+  if (Size >= UART1_FRAME_LEN_DISPLACEMENT) {
+    for (uint16_t i = 0; i <= Size - 22; i++) {
+      if (s_uart1_rx_buf[i] == UART1_FRAME_HEAD) {
+        if (ParseDisplacementFrame(&s_uart1_rx_buf[i],
+                                   UART1_FRAME_LEN_DISPLACEMENT)) {
+          const uint8_t ack = 0x43U;
+          HAL_UART_Transmit(&huart1, (uint8_t *)&ack, 1, 10);
+        }
       }
-    }
-
-    if (head_idx != 0xFFFF) {
-      if (ParseVelocityFrame(&s_frame_buf[head_idx], UART1_FRAME_LEN_VELOCITY)) {
-        const uint8_t ack = 0x43U;
-        (void)HAL_UART_Transmit(&huart1, (uint8_t *)&ack, 1, 10);
-        uint16_t remove_len = head_idx + UART1_FRAME_LEN_VELOCITY;
-        memmove(s_frame_buf, s_frame_buf + remove_len, s_frame_len - remove_len);
-        s_frame_len -= remove_len;
-      } else {
-        memmove(s_frame_buf, s_frame_buf + head_idx + 1, s_frame_len - head_idx - 1);
-        s_frame_len -= (head_idx + 1);
-      }
-    } else {
-      uint16_t remove_len = s_frame_len - UART1_FRAME_LEN_VELOCITY + 1;
-      memmove(s_frame_buf, s_frame_buf + remove_len, s_frame_len - remove_len);
-      s_frame_len -= remove_len;
-      break;
     }
   }
 
+  /* 重新启动 DMA+IDLE 接收 */
   HAL_UARTEx_ReceiveToIdle_DMA(&huart1, s_uart1_rx_buf, UART1_RX_BUF_SIZE);
   if (huart1.hdmarx != NULL) {
     __HAL_DMA_DISABLE_IT(huart1.hdmarx, DMA_IT_HT);

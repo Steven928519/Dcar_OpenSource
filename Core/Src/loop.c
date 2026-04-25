@@ -31,7 +31,8 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
-
+#include <usart.h>
+#include <string.h>
 /* -------------------------------------------------------------------------- */
 /* 模块内共享状态 */
 /* -------------------------------------------------------------------------- */
@@ -39,7 +40,7 @@ static ICM20602_Data_TypeDef imu_raw;
 static ICM20602_Attitude_TypeDef imu_angles = {0};
 static IMU_InitState_t imu_status = IMU_STATE_RESET;
 static uint8_t remote_mode_enabled = 0;
-static uint32_t total_ticks = 0;
+//static uint32_t total_ticks = 0;
 
 /* -------------------------------------------------------------------------- */
 /* 1000 Hz — IMU 读取 + Mahony 姿态解算                                       */
@@ -139,8 +140,17 @@ static void LOOP_50HZ(void) {
     /* 打印里程计数据，验证方向正负 */
     Odometry_TypeDef odo_data;
     Odometry_GetData(&odo_data);
-    printf("ODO: x:%.1f y:%.1f yaw:%.1f vx:%.1f vy:%.1f\n", odo_data.x,
-           odo_data.y, odo_data.yaw, odo_data.vx, odo_data.vy);
+		int len=0;
+		char buf[128];
+		len = snprintf(buf, sizeof(buf),
+                       "ODO: x:%.1f y:%.1f yaw:%.1f vx:%.1f vy:%.1f\n",
+                       odo_data.x, odo_data.y, odo_data.yaw,
+                       odo_data.vx, odo_data.vy);
+        if (len > 0) {
+            HAL_UART_Transmit(&huart4, (uint8_t*)buf, (uint16_t)len, 10);
+        }
+    //printf("ODO: x:%.1f y:%.1f yaw:%.1f vx:%.1f vy:%.1f\n", odo_data.x,
+           //odo_data.y, odo_data.yaw, odo_data.vx, odo_data.vy);
   }
 }
 
@@ -155,7 +165,7 @@ void Loop_Run(void) {
   uint32_t now = HAL_GetTick();
 
   if (now - last_1000hz >= 1) {
-    last_1000hz = now;
+  last_1000hz = now; 
     LOOP_1000HZ();
   }
 
