@@ -58,11 +58,17 @@ static void LOOP_1000HZ(void) {
 /* 100 Hz — 遥控/串口模式判断 + Yaw PID + 运动解耦                            */
 /* -------------------------------------------------------------------------- */
 static void LOOP_100HZ(void) {
+  /* ===== 调试：入口翻转 PC13 ===== */
+  HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+  
   Uart1_ControlCmd_t uart_cmd;
   float vx = 0, vy = 0, w = 0;
   uint8_t manual_active = 0;
 
   if (imu_status == IMU_STATE_READY) {
+    /* ===== 调试：步骤1 ===== */
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+    
     Uart1_Control_GetLatestCmd(&uart_cmd);
 
     /* 1. 串口处理 */
@@ -80,6 +86,9 @@ static void LOOP_100HZ(void) {
         Uart1_Control_ClearCmd();
       }
     }
+
+    /* ===== 调试：步骤2 ===== */
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
 
     /* 2. 遥控处理 (如果没有串口速度指令) */
     if (!manual_active && MoveControl_GetState() != MOVE_EXECUTING) {
@@ -112,6 +121,9 @@ static void LOOP_100HZ(void) {
       }
     }
 
+    /* ===== 调试：步骤3 ===== */
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+
     /* 3. 任务执行与锁头下发 */
     if (MoveControl_GetState() == MOVE_EXECUTING) {
       MoveControl_Update();
@@ -122,12 +134,24 @@ static void LOOP_100HZ(void) {
       Motion_HandleManual(vx, vy, w, imu_angles.yaw);
     }
 
+    /* ===== 调试：步骤4 ===== */
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+
+    /* 发送串口应答 */
+    Uart1_Control_SendAck();
+
+    /* ===== 调试：步骤5 ===== */
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+
     /* 更新里程计 */
     Odometry_Update(imu_angles.yaw, 0.01f);
   } else {
     MotorControl_StopAll();
     HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin, GPIO_PIN_SET);
   }
+  
+  /* ===== 调试：出口翻转 PC13 ===== */
+  HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
 }
 
 /* -------------------------------------------------------------------------- */

@@ -23,14 +23,26 @@
  *   - 将解析出的 vx/vy/w (mm/s) 填入 Uart1_ControlCmd_t 供上层查询
  *   - 收到合法指令时回传 0x43 作为应答
  *
- * 测试指令 (14 字节, 波特率 115200, 十六进制发送):
+ * 匀速位移 (0x64) 与 自适应位移 (0x65) 协议相同:
+ *   数据区 14 字节:
+ *     [0..3]   S32 小端: X 位移 (厘米 × 100)
+ *     [4..7]   S32 小端: Y 位移 (厘米 × 100)
+ *     [8..11]  S32 小端: Z 位移/航向 (厘米 × 100)
+ *     [12..13] U16 小端: 最大合速度 (厘米/秒 × 100)
+ *   单位转换: raw_value / 10.0 → mm 或 mm/s
+ *   区别: 0x65 为自适应加减速，0x64 为匀速平移
  *
- *   前进 300 mm/s:   DF 01 97 02 67 06 00 00 2C 01 00 00 FD 10
- *   后退 300 mm/s:   DF 01 97 02 67 06 00 00 D4 FE 00 00 FD B5
- *   右直行 300 mm/s:  DF 01 97 02 67 06 2C 01 00 00 00 00 FD 10
- *   左直行 300 mm/s:  DF 01 97 02 67 06 D4 FE 00 00 00 00 FD B5
- *   顺时针旋转 300:   DF 01 97 02 67 06 00 00 00 00 2C 01 FD 10
- *   停止:            DF 01 97 02 67 06 00 00 00 00 00 00 FD E3
+ * 测试指令 (波特率 115200, 十六进制发送):
+ *
+ *   [0x67] 前进 300 mm/s:   DF 01 97 02 67 06 00 00 2C 01 00 00 FD 10
+ *   [0x67] 后退 300 mm/s:   DF 01 97 02 67 06 00 00 D4 FE 00 00 FD B5
+ *   [0x67] 右直行 300 mm/s:  DF 01 97 02 67 06 2C 01 00 00 00 00 FD 10
+ *   [0x67] 左直行 300 mm/s:  DF 01 97 02 67 06 D4 FE 00 00 00 00 FD B5
+ *   [0x67] 顺时针旋转 300:   DF 01 97 02 67 06 00 00 00 00 2C 01 FD 10
+ *   [0x67] 停止:            DF 01 97 02 67 06 00 00 00 00 00 00 FD E3
+ *
+ *   [0x64] 匀速位移 X+20cm (200mm), 速度 50cm/s:
+ *     DF 01 97 02 64 0E D0 07 00 00 00 00 00 00 00 00 00 00 88 13 FD ??
  *
  *   解析成功时单片机回传 0x43
  ******************************************************************************
@@ -44,7 +56,7 @@
 /* USART1 DMA 接收缓冲区配置: 存放 HAL DMA+IDLE 收到的原始字节流 */
 #define UART1_RX_BUF_SIZE 128
 
-/* 协议常量 (当前仅实现: 匀速移动指令 A=0x02/B=0x67) */
+/* 协议常量 (当前实现: 匀速速度控制 0x67, 匀速位移 0x64, 自适应位移 0x65) */
 #define UART1_FRAME_HEAD 0xDF
 #define UART1_FRAME_TAIL 0xFD
 
@@ -54,6 +66,7 @@
 #define UART1_TYPE_A_MOVE 0x02
 #define UART1_TYPE_B_VELOCITY 0x67     /* 持续速度控制 */
 #define UART1_TYPE_B_DISPLACEMENT 0x64 /* 定点匀速位移 */
+#define UART1_TYPE_B_ADAPTIVE_DISP 0x65 /* 定点自适应位移 (自动加减速) */
 
 #define UART1_DATA_LEN_VELOCITY 0x06
 #define UART1_DATA_LEN_DISPLACEMENT 14
@@ -68,8 +81,11 @@
    1U /* len */ + UART1_DATA_LEN_DISPLACEMENT /* payload */ + 1U /* tail */ +  \
    1U /* checksum */)
 
-/* 速度缩放: 协议中 S16 一位对应多少 mm/s (由上位机约定) */
+/* 速度缩放: 协议中 S16 一位对应多少 mm/s */
 #define UART1_SPEED_SCALE_MMPS_PER_LSB 1.0f
+
+/* 位移帧单位转换: 协议值 = 厘米 × 100, 目标单位 mm => raw / 100.0 × 10 = raw / 10.0 */
+#define UART1_DISP_CM_TO_MM_FACTOR 10.0f
 
 /* DMA 接收缓冲区 (只在本模块内部可见) */
 static uint8_t s_uart1_rx_buf[UART1_RX_BUF_SIZE];
@@ -128,17 +144,21 @@ static uint8_t ParseVelocityFrame(const uint8_t *buf, uint16_t size) {
   return 1U;
 }
 
-/* 尝试解析位移控制帧 (0x64) */
-static uint8_t ParseDisplacementFrame(const uint8_t *buf, uint16_t size) {
+/* 尝试解析位移控制帧 (0x64 / 0x65) */
+static uint8_t ParseDisplacementFrame(const uint8_t *buf, uint16_t size, Uart1_CmdType_t type) {
   if (size != (uint16_t)UART1_FRAME_LEN_DISPLACEMENT)
     return 0U;
   if (buf[0] != UART1_FRAME_HEAD || buf[20] != UART1_FRAME_TAIL)
     return 0U;
   if (buf[1] != UART1_ADDR_MCU || buf[2] != UART1_ADDR_PC)
     return 0U;
-  if (buf[3] != UART1_TYPE_A_MOVE || buf[4] != UART1_TYPE_B_DISPLACEMENT)
+  if (buf[3] != UART1_TYPE_A_MOVE || (buf[4] != UART1_TYPE_B_DISPLACEMENT && buf[4] != UART1_TYPE_B_ADAPTIVE_DISP))
     return 0U;
   if (buf[5] != UART1_DATA_LEN_DISPLACEMENT)
+    return 0U;
+  if (buf[4] == UART1_TYPE_B_DISPLACEMENT && type != UART1_CMD_DISPLACEMENT)
+    return 0U;
+  if (buf[4] == UART1_TYPE_B_ADAPTIVE_DISP && type != UART1_CMD_ADAPTIVE_DISP)
     return 0U;
 
   uint8_t sum = 0U;
@@ -148,19 +168,18 @@ static uint8_t ParseDisplacementFrame(const uint8_t *buf, uint16_t size) {
     return 0U;
 
   Uart1_ControlCmd_t cmd = {0};
-  cmd.type = UART1_CMD_DISPLACEMENT;
+  cmd.type = type;
   /*
-   * 协议修正: 接收的是 S32 整数 (米 * 100,000)
-   * 目标单位是 mm: (int / 100,000) * 1,000 = int / 100
-   * 例如: 输入 0.2m -> 协议发送 20,000 (20 4E 00 00) -> 转换后为 200.0 mm
+   * 协议: F32 表示 厘米 × 100 (4字节小端整数), 目标单位 mm
+   * 转换: (raw / 100.0) cm × 10 = raw / 10.0 mm
+   * 例如: 0.2m = 20cm -> 协议值 2000 -> 2000/10 = 200mm ✓
    */
-  cmd.target_x_mm = (float)BytesToS32LE(&buf[6]) / 100.0f;
-  cmd.target_y_mm = (float)BytesToS32LE(&buf[10]) / 100.0f;
-  cmd.target_z_mm = (float)BytesToS32LE(&buf[14]) / 100.0f;
+  cmd.target_x_mm = (float)BytesToS32LE(&buf[6]) / UART1_DISP_CM_TO_MM_FACTOR;
+  cmd.target_y_mm = (float)BytesToS32LE(&buf[10]) / UART1_DISP_CM_TO_MM_FACTOR;
+  cmd.target_z_mm = (float)BytesToS32LE(&buf[14]) / UART1_DISP_CM_TO_MM_FACTOR;
 
-  // 限速单位是 cm/s，放大 100 倍存入 U16，转换为 mm/s 需要: (raw / 100) * 10 =
-  // raw / 10
-  cmd.target_speed_mmps = (float)BytesToU16LE(buf[18], buf[19]) / 10.0f;
+  /* F16 速度: 厘米/秒 × 100, 转 mm/s => raw / 10.0 */
+  cmd.target_speed_mmps = (float)BytesToU16LE(buf[18], buf[19]) / UART1_DISP_CM_TO_MM_FACTOR;
   cmd.valid = 1U;
 
   s_latest_cmd = cmd;
@@ -191,9 +210,9 @@ void Uart1_Control_GetLatestCmd(Uart1_ControlCmd_t *out) {
   if (out == NULL) {
     return;
   }
-  /* 简单的“临界区”: 复制结构体时短暂关中断, 防止中断同时修改 s_latest_cmd */
+  /* 简单的"临界区": 复制结构体时短暂关中断, 防止中断同时修改 s_latest_cmd */
   __disable_irq();
-//  *out = (Uart1_ControlCmd_t)s_latest_cmd;
+  *out = s_latest_cmd;
   __enable_irq();
 }
 
@@ -204,10 +223,10 @@ void Uart1_Control_ClearCmd(void) {
   __enable_irq();
 }
 
+/* 应答标志：中断回调设置，主循环读取并发送 */
+static volatile uint8_t s_ack_pending = 0;
+
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
-  /* 调试：翻转 LED 确认回调被调用 */
-  HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-  
   if (huart == NULL) {
     return;
   }
@@ -217,36 +236,56 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
 
   /* 尝试在本次数据块中寻找并解析控制帧
    * 允许前面有噪声或一次收到多帧：匹配到的帧都会更新 s_latest_cmd，最后一帧生效
-   * 每次解析成功则回传 0x43 作为应答
+   * 解析成功则设置应答标志，由主循环发送
    */
+  uint8_t ack_success = 0;
+  
   /* 尝试在本次数据块中寻找并解析控制帧 */
   if (Size >= UART1_FRAME_LEN_VELOCITY) {
     for (uint16_t i = 0; i <= Size - 14; i++) {
       if (s_uart1_rx_buf[i] == UART1_FRAME_HEAD) {
         if (ParseVelocityFrame(&s_uart1_rx_buf[i], UART1_FRAME_LEN_VELOCITY)) {
-          const uint8_t ack = 0x43U;
-          HAL_UART_Transmit(&huart1, (uint8_t *)&ack, 1, 10);
+          ack_success = 1;
         }
       }
     }
   }
 
-  /* 寻找位移帧 (0x64) */
+  /* 寻找位移帧 (0x64 / 0x65) */
   if (Size >= UART1_FRAME_LEN_DISPLACEMENT) {
     for (uint16_t i = 0; i <= Size - 22; i++) {
       if (s_uart1_rx_buf[i] == UART1_FRAME_HEAD) {
-        if (ParseDisplacementFrame(&s_uart1_rx_buf[i],
-                                   UART1_FRAME_LEN_DISPLACEMENT)) {
-          const uint8_t ack = 0x43U;
-          HAL_UART_Transmit(&huart1, (uint8_t *)&ack, 1, 10);
+        if (ParseDisplacementFrame(&s_uart1_rx_buf[i], UART1_FRAME_LEN_DISPLACEMENT, UART1_CMD_DISPLACEMENT)) {
+          ack_success = 1;
+        } else if (ParseDisplacementFrame(&s_uart1_rx_buf[i], UART1_FRAME_LEN_DISPLACEMENT, UART1_CMD_ADAPTIVE_DISP)) {
+          ack_success = 1;
         }
       }
     }
   }
 
+  /* 设置应答标志（主循环负责发送） */
+  if (ack_success) {
+    s_ack_pending = 1;
+  }
+
   /* 重新启动 DMA+IDLE 接收 */
+  /* 先停止 DMA，再重新启动，确保状态机正常 */
+  HAL_UART_AbortReceive(&huart1);
   HAL_UARTEx_ReceiveToIdle_DMA(&huart1, s_uart1_rx_buf, UART1_RX_BUF_SIZE);
   if (huart1.hdmarx != NULL) {
     __HAL_DMA_DISABLE_IT(huart1.hdmarx, DMA_IT_HT);
+  }
+}
+
+/**
+ * @brief  在中断外发送应答（非阻塞）
+ * @note   应在主循环中调用
+ */
+void Uart1_Control_SendAck(void) {
+  if (s_ack_pending) {
+    const uint8_t ack_buf[] = {0x43U, '\r', '\n'};
+    HAL_UART_Transmit(&huart1, ack_buf, sizeof(ack_buf), 10);
+    s_ack_pending = 0;
   }
 }

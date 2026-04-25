@@ -37,7 +37,7 @@ static void Motor_SetPWM(uint8_t motor_id, int16_t pwm_val) {
   pwm_val *= MOTOR_DIR_INVERT(motor_id);
 
   uint16_t pwm_abs;
-  /* PWM 输出死区：绝对值 < 200 时置 0，防止电机低压啸叫 */
+  /* PWM 输出死区：绝对值 < 20 时置 0，防止电机低压啸叫 */
   if (pwm_val > -200 && pwm_val < 200) {
     pwm_val = 0;
   }
