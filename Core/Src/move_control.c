@@ -65,7 +65,7 @@ void MoveControl_SetRelativeTarget(float rel_x, float rel_y,
 }
 
 static void Motion_Decouple(float Vy, float Vx, float w) {
-  /* 电机物理位置: s1=右前, s2=右后, s3=左后, s4=左前 */
+  /* 电机物理位置: s1=左前, s2=右前, s3=右后, s4=左后 */
   float s1 = Vy + Vx + w;
   float s2 = Vy - Vx - w;
   float s3 = Vy + Vx - w;

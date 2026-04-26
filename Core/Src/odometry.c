@@ -21,10 +21,10 @@ void Odometry_Init(void) { Odometry_Reset(); }
 void Odometry_Update(float imu_yaw, float dt) {
   /* 1. 获取四个电机的实际线速度 (mm/s) */
   /* 这里 MotorControl_GetSpeedMMps 已经处理了电机极性和方向 */
-  float s1 = MotorControl_GetSpeedMMps(0); /* 右前 */
-  float s2 = MotorControl_GetSpeedMMps(1); /* 右后 */
-  float s3 = MotorControl_GetSpeedMMps(2); /* 左后 */
-  float s4 = MotorControl_GetSpeedMMps(3); /* 左前 */
+  float s1 = MotorControl_GetSpeedMMps(0); /* 左前 */
+  float s2 = MotorControl_GetSpeedMMps(1); /* 右前 */
+  float s3 = MotorControl_GetSpeedMMps(2); /* 右后 */
+  float s4 = MotorControl_GetSpeedMMps(3); /* 左后 */
 
   /* 2. 四轮编码器反解 Vx, Vy, w (机器人坐标系) */
   /* Vy: 前后 (+为前)

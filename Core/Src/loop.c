@@ -42,6 +42,10 @@ static IMU_InitState_t imu_status = IMU_STATE_RESET;
 static uint8_t remote_mode_enabled = 0;
 //static uint32_t total_ticks = 0;
 
+static uint8_t Read_GPIO_Bit(GPIO_TypeDef *port, uint16_t pin) {
+  return (HAL_GPIO_ReadPin(port, pin) == GPIO_PIN_SET) ? 1U : 0U;
+}
+
 /* -------------------------------------------------------------------------- */
 /* 1000 Hz — IMU 读取 + Mahony 姿态解算                                       */
 /* -------------------------------------------------------------------------- */
@@ -164,15 +168,31 @@ static void LOOP_50HZ(void) {
     /* 打印里程计数据，验证方向正负 */
     Odometry_TypeDef odo_data;
     Odometry_GetData(&odo_data);
-		int len=0;
-		char buf[128];
-		len = snprintf(buf, sizeof(buf),
-                       "ODO: x:%.1f y:%.1f yaw:%.1f vx:%.1f vy:%.1f\n",
-                       odo_data.x, odo_data.y, odo_data.yaw,
-                       odo_data.vx, odo_data.vy);
-        if (len > 0) {
-            HAL_UART_Transmit(&huart4, (uint8_t*)buf, (uint16_t)len, 10);
-        }
+
+    uint8_t enc1_a = Read_GPIO_Bit(GPIOA, GPIO_PIN_5);
+    uint8_t enc1_b = Read_GPIO_Bit(GPIOB, GPIO_PIN_3);
+    uint8_t enc2_a = Read_GPIO_Bit(GPIOA, GPIO_PIN_6);
+    uint8_t enc2_b = Read_GPIO_Bit(GPIOA, GPIO_PIN_7);
+    uint8_t enc3_a = Read_GPIO_Bit(GPIOB, GPIO_PIN_6);
+    uint8_t enc3_b = Read_GPIO_Bit(GPIOB, GPIO_PIN_7);
+    uint8_t enc4_a = Read_GPIO_Bit(GPIOA, GPIO_PIN_0);
+    uint8_t enc4_b = Read_GPIO_Bit(GPIOA, GPIO_PIN_1);
+
+    int len = 0;
+    char buf[192];
+    len = snprintf(buf, sizeof(buf),
+                   "ODO: x:%.1f y:%.1f yaw:%.1f vx:%.1f vy:%.1f "
+                   "ENC_AB: M1:%u%u M2:%u%u M3:%u%u M4:%u%u\n",
+                   odo_data.x, odo_data.y, odo_data.yaw, odo_data.vx,
+                   odo_data.vy, (unsigned)enc1_a, (unsigned)enc1_b,
+                   (unsigned)enc2_a, (unsigned)enc2_b, (unsigned)enc3_a,
+                   (unsigned)enc3_b, (unsigned)enc4_a, (unsigned)enc4_b);
+    if (len > 0) {
+      if (len >= (int)sizeof(buf)) {
+        len = (int)sizeof(buf) - 1;
+      }
+      HAL_UART_Transmit(&huart4, (uint8_t *)buf, (uint16_t)len, 10);
+    }
     //printf("ODO: x:%.1f y:%.1f yaw:%.1f vx:%.1f vy:%.1f\n", odo_data.x,
            //odo_data.y, odo_data.yaw, odo_data.vx, odo_data.vy);
   }
