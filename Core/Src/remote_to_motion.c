@@ -30,11 +30,11 @@ static inline float RawToSpeedWithDeadzone(uint16_t raw) {
  * @param  w:  旋转速度 (RX 控制，正=顺时针)
  */
 static void Motion_Decouple(float Vy, float Vx, float w) {
-  /* 电机物理位置: s1=右前(PC6), s2=右后(PC7), s3=左后(PC8), s4=左前(PC9) */
-  float s1 = Vy + Vx + w; /* 右前 */
-  float s2 = Vy - Vx - w; /* 右后 */
-  float s3 = Vy + Vx - w; /* 左后 */
-  float s4 = Vy - Vx + w; /* 左前 */
+  /* 电机物理位置: M1=左前(PC6), M2=右前(PC7), M3=右后(PC8), M4=左后(PC9) */
+  float s1 = Vy + Vx + w; /* M1 左前 */
+  float s2 = Vy - Vx - w; /* M2 右前 */
+  float s3 = Vy + Vx - w; /* M3 右后 */
+  float s4 = Vy - Vx + w; /* M4 左后 */
 
   MotorControl_SetAllTargetSpeedMMps(s1, s2, s3, s4);
 }
