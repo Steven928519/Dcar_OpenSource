@@ -153,7 +153,7 @@ void Uart1_Control_GetLatestCmd(Uart1_ControlCmd_t *out) {
   }
   /* 简单的“临界区”: 复制结构体时短暂关中断, 防止中断同时修改 s_latest_cmd */
   __disable_irq();
-  *out = (Uart1_ControlCmd_t)s_latest_cmd;
+  *out =s_latest_cmd;
   __enable_irq();
 }
 
