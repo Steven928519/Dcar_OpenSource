@@ -1,4 +1,4 @@
---cpu=Cortex-M4.fp
+--cpu=Cortex-M4.fp.sp
 "dcar_opensource\startup_stm32f407xx.o"
 "dcar_opensource\main.o"
 "dcar_opensource\gpio.o"
@@ -6,8 +6,8 @@
 "dcar_opensource\stm32f4xx_it.o"
 "dcar_opensource\stm32f4xx_hal_msp.o"
 "dcar_opensource\encoder.o"
-"dcar_opensource\pid.o"
 "dcar_opensource\motor_control.o"
+"dcar_opensource\pid.o"
 "dcar_opensource\uart4_debug.o"
 "dcar_opensource\stm32f4xx_hal_tim.o"
 "dcar_opensource\stm32f4xx_hal_tim_ex.o"
