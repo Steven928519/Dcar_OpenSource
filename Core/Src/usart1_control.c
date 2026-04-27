@@ -114,7 +114,7 @@ static uint8_t ParseVelocityFrame(const uint8_t *buf, uint16_t size) {
   if (sum != buf[13])
     return 0U;
 
-  Uart1_ControlCmd_t cmd = {0};
+  Uart1_ControlCmd_t cmd = {UART1_CMD_NONE};
   cmd.type = UART1_CMD_VELOCITY;
   cmd.vx_mmps =
       (float)BytesToS16LE(buf[6], buf[7]) * UART1_SPEED_SCALE_MMPS_PER_LSB;
@@ -147,7 +147,7 @@ static uint8_t ParseDisplacementFrame(const uint8_t *buf, uint16_t size) {
   if (sum != buf[21])
     return 0U;
 
-  Uart1_ControlCmd_t cmd = {0};
+  Uart1_ControlCmd_t cmd = {UART1_CMD_NONE};
   cmd.type = UART1_CMD_DISPLACEMENT;
   /*
    * 协议修正: 接收的是 S32 整数 (米 * 100,000)
@@ -193,7 +193,7 @@ void Uart1_Control_GetLatestCmd(Uart1_ControlCmd_t *out) {
   }
   /* 简单的“临界区”: 复制结构体时短暂关中断, 防止中断同时修改 s_latest_cmd */
   __disable_irq();
-  *out = (Uart1_ControlCmd_t)s_latest_cmd;
+  *out = s_latest_cmd;
   __enable_irq();
 }
 
