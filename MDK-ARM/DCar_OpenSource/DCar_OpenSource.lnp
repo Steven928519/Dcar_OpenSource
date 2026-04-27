@@ -1,4 +1,4 @@
---cpu=Cortex-M4.fp
+--cpu=Cortex-M4.fp.sp
 "dcar_opensource\startup_stm32f407xx.o"
 "dcar_opensource\encoder.o"
 "dcar_opensource\pid.o"
