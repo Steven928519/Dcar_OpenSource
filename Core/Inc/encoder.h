@@ -25,7 +25,7 @@ extern "C" {
 
 /* DF 电机参数 */
 #define DF_ENCODER_LINES    448     /* 编码器线数（每圈脉冲数） */
-#define DF_MOTOR_REDUCTION  30      /* 电机减速比 */
+#define DF_MOTOR_REDUCTION  38      /* 电机减速比 */
 #define DF_WHEEL_DIAMETER_MM 97     /* 轮子直径 (mm) */
 #define DF_WHEEL_POLARITY   1       /* 编码器极性（1 正 / -1 反） */
 
