@@ -3,12 +3,10 @@
  * @file    usart1_control.h
  * @brief   上位机串口控制接口 (USART1 + DMA+IDLE)
  *
- * 负责：
- *   - 通过 USART1 DMA+IDLE 接收上位机数据帧
- *   - 解析出统一的车体运动指令 (Vx/Vy/w，单位 mm/s)
- *   - 提供查询最新命令的接口，供主循环/调度层调用
- *
- * 具体协议格式稍后与上位机约定后再补充实现。
+ * 支持三种控制帧:
+ *   - 0x67 持续速度控制 (Vx/Vy/w, mm/s)
+ *   - 0x64 定点匀速位移 (X/Y/Z cm, 速度 cm/s)
+ *   - 0x65 定点自适应位移 (自动加减速, 同0x64格式)
  ******************************************************************************
  */
 #ifndef __USART1_CONTROL_H__
@@ -25,8 +23,9 @@ extern "C" {
  */
 typedef enum {
   UART1_CMD_NONE = 0,
-  UART1_CMD_VELOCITY,    /* 0x67 持续速度控制 */
-  UART1_CMD_DISPLACEMENT /* 0x64 定点匀速位移 */
+  UART1_CMD_VELOCITY,     /* 0x67 持续速度控制 */
+  UART1_CMD_DISPLACEMENT, /* 0x64 定点匀速位移 */
+  UART1_CMD_ADAPTIVE_DISP /* 0x65 定点自适应位移 (自动加减速) */
 } Uart1_CmdType_t;
 
 /**
@@ -67,6 +66,12 @@ void Uart1_Control_Init(void);
  * @param  out: 用户提供的结构体指针，用于接收数据
  */
 void Uart1_Control_GetLatestCmd(Uart1_ControlCmd_t *out);
+
+/**
+ * @brief  发送串口应答（在主循环中调用）
+ * @note   内部检查应答标志，有应答时才发送
+ */
+void Uart1_Control_SendAck(void);
 
 #ifdef __cplusplus
 }
