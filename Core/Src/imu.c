@@ -56,7 +56,7 @@ uint8_t ICM20602_ReadReg(uint8_t reg) {
  */
 static uint8_t SPI2_ReadWriteByte(uint8_t byte) {
   uint8_t res;
-  HAL_SPI_TransmitReceive(&hspi2, &byte, &res, 1, 100);
+  HAL_SPI_TransmitReceive(&hspi2, &byte, &res, 1, 1);
   return res;
 }
 
@@ -113,15 +113,22 @@ IMU_InitState_t ICM20602_Init_NonBlocking(void) {
 
   case IMU_STATE_CONFIG:
     // 基础量程配置
-    ICM20602_WriteReg(0x1B, 0x18); // 陀螺仪: +-2000dps
-    ICM20602_WriteReg(0x1C, 0x18); // 加速度计: +-16g
+    ICM20602_WriteReg(0x1B, 0x18); // 陀螺仪：+-2000dps
+    ICM20602_WriteReg(0x1C, 0x18); // 加速度计：+-16g
     ICM20602_WriteReg(0x1D, 0x06); // 加速度计低通滤波
     current_state = IMU_STATE_READY;
     break;
 
   case IMU_STATE_READY:
+    /* 正常运行状态，保持 */
+    break;
+
   case IMU_STATE_ERROR:
-    // 保持最终状态
+    /* 错误状态：等待 500ms 后自动重试复位 */
+    if (now - state_tick >= 500) {
+      current_state = IMU_STATE_RESET;
+      state_tick = now;
+    }
     break;
   }
   return current_state;

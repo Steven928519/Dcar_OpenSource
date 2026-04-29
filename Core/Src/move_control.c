@@ -7,7 +7,6 @@
 #include "odometry.h"
 #include "pid.h"
 #include <math.h>
-#include <stdio.h>
 
 /* 定制 PID 参数 */
 #define POS_KP 10.0f
@@ -40,9 +39,15 @@ void MoveControl_SetRelativeTarget(float rel_x, float rel_y,
   Odometry_TypeDef odo;
   Odometry_GetData(&odo);
 
-  /* 设置目标世界坐标 */
-  target_xw = odo.x + rel_x;
-  target_yw = odo.y + rel_y;
+  float yaw_rad = odo.yaw * 0.01745329f;
+  float cos_y = cosf(yaw_rad);
+  float sin_y = sinf(yaw_rad);
+  float rel_xw = rel_x * cos_y + rel_y * sin_y;
+  float rel_yw = -rel_x * sin_y + rel_y * cos_y;
+
+  /* Convert body-relative displacement to a world-frame target. */
+  target_xw = odo.x + rel_xw;
+  target_yw = odo.y + rel_yw;
   target_yaw = target_yaw_deg;
 
   /* 设置速度上限 */
@@ -60,12 +65,10 @@ void MoveControl_SetRelativeTarget(float rel_x, float rel_y,
   PID_Reset(&pid_w);
 
   current_state = MOVE_EXECUTING;
-  printf("Move Start: Target X:%.1f Y:%.1f Yaw:%.1f, Speed Limit:%.1f\n",
-         target_xw, target_yw, target_yaw, speed_limit);
 }
 
 static void Motion_Decouple(float Vy, float Vx, float w) {
-  /* 电机物理位置: s1=右前, s2=右后, s3=左后, s4=左前 */
+  /* 电机物理位置: s1=左前, s2=右前, s3=右后, s4=左后 */
   float s1 = Vy + Vx + w;
   float s2 = Vy - Vx - w;
   float s3 = Vy + Vx - w;
@@ -84,20 +87,18 @@ void MoveControl_Update(void) {
   /* 1. 计算世界系误差 */
   float err_xw = target_xw - odo.x;
   float err_yw = target_yw - odo.y;
-  float err_yaw = target_yaw - odo.yaw;
 
   /* 2. 检查是否到达 */
   float dist = sqrtf(err_xw * err_xw + err_yw * err_yw);
   if (dist < ARRIVE_DEADZONE) {
     current_state = MOVE_FINISHED;
     Motion_Decouple(0, 0, 0);
-    printf("Move Finished at X:%.1f Y:%.1f\n", odo.x, odo.y);
     return;
   }
 
-  /* 3. 世界系下的 PID 计算目标速度 */
-  float v_xw = PID_Calc(&pid_x, target_xw, odo.x);
-  float v_yw = PID_Calc(&pid_y, target_yw, odo.y);
+  /* 3. Uniform-speed world-frame velocity toward the target. */
+  float v_xw = err_xw / dist * speed_limit;
+  float v_yw = err_yw / dist * speed_limit;
   float w_out = PID_Calc(&pid_w, target_yaw, odo.yaw);
 
   /* 4. 将世界系速度投影到机器人坐标系 */

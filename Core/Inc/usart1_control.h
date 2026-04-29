@@ -3,10 +3,9 @@
  * @file    usart1_control.h
  * @brief   上位机串口控制接口 (USART1 + DMA+IDLE)
  *
- * 支持三种控制帧:
+ * 支持两种控制帧:
  *   - 0x67 持续速度控制 (Vx/Vy/w, mm/s)
  *   - 0x64 定点匀速位移 (X/Y/Z cm, 速度 cm/s)
- *   - 0x65 定点自适应位移 (自动加减速, 同0x64格式)
  ******************************************************************************
  */
 #ifndef __USART1_CONTROL_H__
@@ -24,8 +23,7 @@ extern "C" {
 typedef enum {
   UART1_CMD_NONE = 0,
   UART1_CMD_VELOCITY,     /* 0x67 持续速度控制 */
-  UART1_CMD_DISPLACEMENT, /* 0x64 定点匀速位移 */
-  UART1_CMD_ADAPTIVE_DISP /* 0x65 定点自适应位移 (自动加减速) */
+  UART1_CMD_DISPLACEMENT /* 0x64 定点匀速位移 */
 } Uart1_CmdType_t;
 
 /**

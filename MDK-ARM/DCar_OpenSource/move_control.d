@@ -38,4 +38,3 @@ dcar_opensource\move_control.o: ../Core/Inc/encoder.h
 dcar_opensource\move_control.o: ../Core/Inc/odometry.h
 dcar_opensource\move_control.o: ../Core/Inc/pid.h
 dcar_opensource\move_control.o: D:\Keil_v5\ARM\ARMCC\Bin\..\include\math.h
-dcar_opensource\move_control.o: D:\Keil_v5\ARM\ARMCC\Bin\..\include\stdio.h

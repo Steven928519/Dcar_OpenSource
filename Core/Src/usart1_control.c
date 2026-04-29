@@ -23,14 +23,14 @@
  *   - 将解析出的 vx/vy/w (mm/s) 填入 Uart1_ControlCmd_t 供上层查询
  *   - 收到合法指令时回传 0x43 作为应答
  *
- * 匀速位移 (0x64) 与 自适应位移 (0x65) 协议相同:
+ * 匀速位移 (0x64):
  *   数据区 14 字节:
  *     [0..3]   S32 小端: X 位移 (厘米 × 100)
  *     [4..7]   S32 小端: Y 位移 (厘米 × 100)
  *     [8..11]  S32 小端: Z 位移/航向 (厘米 × 100)
  *     [12..13] U16 小端: 最大合速度 (厘米/秒 × 100)
  *   单位转换: raw_value / 10.0 → mm 或 mm/s
- *   区别: 0x65 为自适应加减速，0x64 为匀速平移
+ *   当前只处理 0x64 匀速平移
  *
  * 测试指令 (波特率 115200, 十六进制发送):
  *
@@ -58,7 +58,7 @@
 #define UART1_STREAM_BUF_SIZE 256
 #define UART1_FRAME_WAIT_TIMEOUT_MS 100U
 
-/* 协议常量 (当前实现: 匀速速度控制 0x67, 匀速位移 0x64, 自适应位移 0x65) */
+/* 协议常量 (当前实现: 匀速速度控制 0x67, 匀速位移 0x64) */
 #define UART1_FRAME_HEAD 0xDF
 #define UART1_FRAME_TAIL 0xFD
 
@@ -68,7 +68,6 @@
 #define UART1_TYPE_A_MOVE 0x02
 #define UART1_TYPE_B_VELOCITY 0x67     /* 持续速度控制 */
 #define UART1_TYPE_B_DISPLACEMENT 0x64 /* 定点匀速位移 */
-#define UART1_TYPE_B_ADAPTIVE_DISP 0x65 /* 定点自适应位移 (自动加减速) */
 
 #define UART1_DATA_LEN_VELOCITY 0x06
 #define UART1_DATA_LEN_DISPLACEMENT 14
@@ -98,6 +97,33 @@ static uint8_t s_uart1_rx_buf[UART1_RX_BUF_SIZE];
 static uint8_t s_uart1_stream_buf[UART1_STREAM_BUF_SIZE];
 static uint16_t s_uart1_stream_len = 0U;
 static uint32_t s_uart1_stream_last_tick = 0U;
+static uint16_t s_uart1_last_rx_size = 0U;
+
+typedef struct {
+  uint32_t seq;
+  uint16_t rx_size;
+  uint16_t stream_len;
+  uint16_t frame_len;
+  uint8_t code;
+  uint8_t hdr[6];
+  uint8_t tail;
+  uint8_t checksum_calc;
+  uint8_t checksum_rx;
+  int32_t x_raw;
+  int32_t y_raw;
+  int32_t z_raw;
+  uint16_t speed_raw;
+} Uart1_DebugInfo_t;
+
+#define UART1_DBG64_SEEN 1U
+#define UART1_DBG64_WAIT_MORE 2U
+#define UART1_DBG64_BAD_TAIL 3U
+#define UART1_DBG64_BAD_SUM 4U
+#define UART1_DBG64_PARSE_OK 5U
+#define UART1_DBG64_PARSE_FAIL 6U
+
+static volatile Uart1_DebugInfo_t s_uart1_debug;
+static volatile uint8_t s_uart1_debug_pending = 0U;
 
 /* 最近一次解析成功的控制命令
  * 标记为 volatile 是为了防止编译器在中断与主循环之间优化掉读写
@@ -121,6 +147,58 @@ static int32_t BytesToS32LE(const uint8_t *p) {
 }
 
 /* 尝试解析速度控制帧 (0x67) */
+static uint8_t Uart1_ChecksumCalc(const uint8_t *frame, uint16_t frame_len) {
+  uint8_t sum = 0U;
+
+  if (frame == NULL || frame_len < 2U) {
+    return 0U;
+  }
+
+  for (uint16_t i = 0U; i < (uint16_t)(frame_len - 1U); i++) {
+    sum = (uint8_t)(sum + frame[i]);
+  }
+
+  return sum;
+}
+
+static void Uart1_Debug64Set(uint8_t code, uint16_t frame_len,
+                             uint8_t checksum_calc) {
+  s_uart1_debug.seq++;
+  s_uart1_debug.code = code;
+  s_uart1_debug.rx_size = s_uart1_last_rx_size;
+  s_uart1_debug.stream_len = s_uart1_stream_len;
+  s_uart1_debug.frame_len = frame_len;
+  s_uart1_debug.checksum_calc = checksum_calc;
+
+  for (uint8_t i = 0U; i < 6U; i++) {
+    s_uart1_debug.hdr[i] =
+        (i < s_uart1_stream_len) ? s_uart1_stream_buf[i] : 0U;
+  }
+
+  if (frame_len > 1U && s_uart1_stream_len >= frame_len) {
+    s_uart1_debug.tail = s_uart1_stream_buf[frame_len - 2U];
+    s_uart1_debug.checksum_rx = s_uart1_stream_buf[frame_len - 1U];
+  } else {
+    s_uart1_debug.tail = 0U;
+    s_uart1_debug.checksum_rx = 0U;
+  }
+
+  if (s_uart1_stream_len >= (uint16_t)UART1_FRAME_LEN_DISPLACEMENT) {
+    s_uart1_debug.x_raw = BytesToS32LE(&s_uart1_stream_buf[6]);
+    s_uart1_debug.y_raw = BytesToS32LE(&s_uart1_stream_buf[10]);
+    s_uart1_debug.z_raw = BytesToS32LE(&s_uart1_stream_buf[14]);
+    s_uart1_debug.speed_raw =
+        BytesToU16LE(s_uart1_stream_buf[18], s_uart1_stream_buf[19]);
+  } else {
+    s_uart1_debug.x_raw = 0;
+    s_uart1_debug.y_raw = 0;
+    s_uart1_debug.z_raw = 0;
+    s_uart1_debug.speed_raw = 0U;
+  }
+
+  s_uart1_debug_pending = 1U;
+}
+
 static uint8_t ParseVelocityFrame(const uint8_t *buf, uint16_t size) {
   if (size != (uint16_t)UART1_FRAME_LEN_VELOCITY)
     return 0U;
@@ -153,21 +231,17 @@ static uint8_t ParseVelocityFrame(const uint8_t *buf, uint16_t size) {
   return 1U;
 }
 
-/* 尝试解析位移控制帧 (0x64 / 0x65) */
-static uint8_t ParseDisplacementFrame(const uint8_t *buf, uint16_t size, Uart1_CmdType_t type) {
+/* 尝试解析位移控制帧 (0x64) */
+static uint8_t ParseDisplacementFrame(const uint8_t *buf, uint16_t size) {
   if (size != (uint16_t)UART1_FRAME_LEN_DISPLACEMENT)
     return 0U;
   if (buf[0] != UART1_FRAME_HEAD || buf[20] != UART1_FRAME_TAIL)
     return 0U;
   if (buf[1] != UART1_ADDR_MCU || buf[2] != UART1_ADDR_PC)
     return 0U;
-  if (buf[3] != UART1_TYPE_A_MOVE || (buf[4] != UART1_TYPE_B_DISPLACEMENT && buf[4] != UART1_TYPE_B_ADAPTIVE_DISP))
+  if (buf[3] != UART1_TYPE_A_MOVE || buf[4] != UART1_TYPE_B_DISPLACEMENT)
     return 0U;
   if (buf[5] != UART1_DATA_LEN_DISPLACEMENT)
-    return 0U;
-  if (buf[4] == UART1_TYPE_B_DISPLACEMENT && type != UART1_CMD_DISPLACEMENT)
-    return 0U;
-  if (buf[4] == UART1_TYPE_B_ADAPTIVE_DISP && type != UART1_CMD_ADAPTIVE_DISP)
     return 0U;
 
   uint8_t sum = 0U;
@@ -177,7 +251,7 @@ static uint8_t ParseDisplacementFrame(const uint8_t *buf, uint16_t size, Uart1_C
     return 0U;
 
   Uart1_ControlCmd_t cmd = {0};
-  cmd.type = type;
+  cmd.type = UART1_CMD_DISPLACEMENT;
   /*
    * 协议: F32 表示 厘米 × 100 (4字节小端整数), 目标单位 mm
    * 转换: (raw / 100.0) cm × 10 = raw / 10.0 mm
@@ -193,6 +267,25 @@ static uint8_t ParseDisplacementFrame(const uint8_t *buf, uint16_t size, Uart1_C
 
   s_latest_cmd = cmd;
   return 1U;
+}
+
+static uint8_t ParseRawDisplacementBlock(const uint8_t *data, uint16_t size) {
+  if (data == NULL || size < (uint16_t)UART1_FRAME_LEN_DISPLACEMENT) {
+    return 0U;
+  }
+
+  for (uint16_t i = 0U;
+       i <= (uint16_t)(size - (uint16_t)UART1_FRAME_LEN_DISPLACEMENT); i++) {
+    if (data[i] == UART1_FRAME_HEAD &&
+        data[i + 4U] == UART1_TYPE_B_DISPLACEMENT &&
+        data[i + 5U] == UART1_DATA_LEN_DISPLACEMENT &&
+        ParseDisplacementFrame(&data[i],
+                               (uint16_t)UART1_FRAME_LEN_DISPLACEMENT)) {
+      return 1U;
+    }
+  }
+
+  return 0U;
 }
 
 static void Uart1_StreamDrop(uint16_t count) {
@@ -212,20 +305,6 @@ static void Uart1_StreamResetIfTimeout(uint32_t now_tick) {
           UART1_FRAME_WAIT_TIMEOUT_MS) {
     s_uart1_stream_len = 0U;
   }
-}
-
-static uint8_t Uart1_FrameChecksumOk(const uint8_t *frame, uint16_t frame_len) {
-  uint8_t sum = 0U;
-
-  if (frame_len < 2U) {
-    return 0U;
-  }
-
-  for (uint16_t i = 0U; i < (uint16_t)(frame_len - 1U); i++) {
-    sum = (uint8_t)(sum + frame[i]);
-  }
-
-  return (sum == frame[frame_len - 1U]) ? 1U : 0U;
 }
 
 static void Uart1_StreamPush(const uint8_t *data, uint16_t size) {
@@ -272,7 +351,6 @@ static uint8_t Uart1_StreamParse(void) {
     }
 
     uint16_t frame_len = 0U;
-    Uart1_CmdType_t disp_type = UART1_CMD_NONE;
 
     if (s_uart1_stream_buf[4] == UART1_TYPE_B_VELOCITY &&
         s_uart1_stream_buf[5] == UART1_DATA_LEN_VELOCITY) {
@@ -280,22 +358,32 @@ static uint8_t Uart1_StreamParse(void) {
     } else if (s_uart1_stream_buf[4] == UART1_TYPE_B_DISPLACEMENT &&
                s_uart1_stream_buf[5] == UART1_DATA_LEN_DISPLACEMENT) {
       frame_len = (uint16_t)UART1_FRAME_LEN_DISPLACEMENT;
-      disp_type = UART1_CMD_DISPLACEMENT;
-    } else if (s_uart1_stream_buf[4] == UART1_TYPE_B_ADAPTIVE_DISP &&
-               s_uart1_stream_buf[5] == UART1_DATA_LEN_DISPLACEMENT) {
-      frame_len = (uint16_t)UART1_FRAME_LEN_DISPLACEMENT;
-      disp_type = UART1_CMD_ADAPTIVE_DISP;
+      Uart1_Debug64Set(UART1_DBG64_SEEN, frame_len, 0U);
     } else {
       Uart1_StreamDrop(1U);
       continue;
     }
 
     if (s_uart1_stream_len < frame_len) {
+      if (frame_len == (uint16_t)UART1_FRAME_LEN_DISPLACEMENT) {
+        Uart1_Debug64Set(UART1_DBG64_WAIT_MORE, frame_len, 0U);
+      }
       break;
     }
 
-    if (s_uart1_stream_buf[frame_len - 2U] != UART1_FRAME_TAIL ||
-        !Uart1_FrameChecksumOk(s_uart1_stream_buf, frame_len)) {
+    uint8_t checksum_calc = Uart1_ChecksumCalc(s_uart1_stream_buf, frame_len);
+    if (s_uart1_stream_buf[frame_len - 2U] != UART1_FRAME_TAIL) {
+      if (frame_len == (uint16_t)UART1_FRAME_LEN_DISPLACEMENT) {
+        Uart1_Debug64Set(UART1_DBG64_BAD_TAIL, frame_len, checksum_calc);
+      }
+      Uart1_StreamDrop(1U);
+      continue;
+    }
+
+    if (checksum_calc != s_uart1_stream_buf[frame_len - 1U]) {
+      if (frame_len == (uint16_t)UART1_FRAME_LEN_DISPLACEMENT) {
+        Uart1_Debug64Set(UART1_DBG64_BAD_SUM, frame_len, checksum_calc);
+      }
       Uart1_StreamDrop(1U);
       continue;
     }
@@ -304,9 +392,13 @@ static uint8_t Uart1_StreamParse(void) {
       if (ParseVelocityFrame(s_uart1_stream_buf, frame_len)) {
         ack_success = 1U;
       }
-    } else if (ParseDisplacementFrame(s_uart1_stream_buf, frame_len,
-                                      disp_type)) {
-      ack_success = 1U;
+    } else {
+      if (ParseDisplacementFrame(s_uart1_stream_buf, frame_len)) {
+        Uart1_Debug64Set(UART1_DBG64_PARSE_OK, frame_len, checksum_calc);
+        ack_success = 1U;
+      } else {
+        Uart1_Debug64Set(UART1_DBG64_PARSE_FAIL, frame_len, checksum_calc);
+      }
     }
 
     Uart1_StreamDrop(frame_len);
@@ -324,6 +416,8 @@ void Uart1_Control_Init(void) {
   s_latest_cmd.valid = 0U;
   s_uart1_stream_len = 0U;
   s_uart1_stream_last_tick = HAL_GetTick();
+  s_uart1_last_rx_size = 0U;
+  s_uart1_debug_pending = 0U;
 
   /* 启动 USART1 的 DMA+IDLE 接收
    * - huart1: 来自 usart.c 的 UART1 句柄
@@ -370,13 +464,17 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
    * 解析成功则设置应答标志，由主循环发送
    */
   uint32_t now_tick = HAL_GetTick();
+  s_uart1_last_rx_size = Size;
   Uart1_StreamResetIfTimeout(now_tick);
   Uart1_StreamPush(s_uart1_rx_buf, Size);
   s_uart1_stream_last_tick = now_tick;
-  uint8_t ack_success = Uart1_StreamParse();
+  uint8_t ack_success = ParseRawDisplacementBlock(s_uart1_rx_buf, Size);
+  if (Uart1_StreamParse()) {
+    ack_success = 1U;
+  }
   
   /* 尝试在本次数据块中寻找并解析控制帧 */
-  /* 寻找位移帧 (0x64 / 0x65) */
+  /* 寻找位移帧 (0x64) */
   /* 设置应答标志（主循环负责发送） */
   if (ack_success) {
     s_ack_pending = 1;

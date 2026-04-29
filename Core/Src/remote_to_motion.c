@@ -9,6 +9,9 @@ static PID_TypeDef yaw_pid;
 static float target_yaw = 0.0f;
 static uint8_t is_yaw_locked = 0;
 
+#define MANUAL_CMD_DEADBAND_MMPS 5.0f
+#define YAW_HOLD_DEADBAND_DEG 0.3f
+
 /**
  * @brief  原始值转速度，带死区
  * @param  raw: 摇杆原始值 240~1807 (SBUS 实际范围)
@@ -30,11 +33,11 @@ static inline float RawToSpeedWithDeadzone(uint16_t raw) {
  * @param  w:  旋转速度 (RX 控制，正=顺时针)
  */
 static void Motion_Decouple(float Vy, float Vx, float w) {
-  /* 电机物理位置: s1=右前(PC6), s2=右后(PC7), s3=左后(PC8), s4=左前(PC9) */
-  float s1 = Vy + Vx + w; /* 右前 */
-  float s2 = Vy - Vx - w; /* 右后 */
-  float s3 = Vy + Vx - w; /* 左后 */
-  float s4 = Vy - Vx + w; /* 左前 */
+  /* 电机物理位置: s1=左前(PC6), s2=右前(PC7), s3=右后(PC8), s4=左后(PC9) */
+  float s1 = Vy + Vx + w; /* 左前 */
+  float s2 = Vy - Vx - w; /* 右前 */
+  float s3 = Vy + Vx - w; /* 右后 */
+  float s4 = Vy - Vx + w; /* 左后 */
 
   MotorControl_SetAllTargetSpeedMMps(s1, s2, s3, s4);
 }
@@ -65,8 +68,19 @@ void RemoteToMotion_Update(float current_yaw, uint8_t is_remote_enabled) {
 }
 
 void Motion_HandleManual(float vx, float vy, float w, float current_yaw) {
+  uint8_t has_translation = (fabsf(vx) > MANUAL_CMD_DEADBAND_MMPS) ||
+                            (fabsf(vy) > MANUAL_CMD_DEADBAND_MMPS);
+  uint8_t has_rotation = fabsf(w) > MANUAL_CMD_DEADBAND_MMPS;
+
+  if (!has_translation && !has_rotation) {
+    is_yaw_locked = 0;
+    target_yaw = current_yaw;
+    PID_Reset(&yaw_pid);
+    Motion_Decouple(0.0f, 0.0f, 0.0f);
+    return;
+  }
   /* 锁头逻辑实现 (核心：只要没有手动旋转指令 w，就自动维持当前 yaw) */
-  if (fabsf(w) > 0.01f) {
+  if (has_rotation) {
     /* 用户手动主动转弯中，清除偏差状态 */
     is_yaw_locked = 0;
     target_yaw = current_yaw;
@@ -81,7 +95,7 @@ void Motion_HandleManual(float vx, float vy, float w, float current_yaw) {
 
     /* 死区：减小电机在极其细微误差下的啸叫 */
     float yaw_error = target_yaw - current_yaw;
-    if (fabsf(yaw_error) < 0.05f) {
+    if (fabsf(yaw_error) < YAW_HOLD_DEADBAND_DEG) {
       w = 0.0f;
     } else {
       w = PID_Calc(&yaw_pid, target_yaw, current_yaw);
