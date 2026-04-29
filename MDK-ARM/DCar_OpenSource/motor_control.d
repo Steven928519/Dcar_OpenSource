@@ -37,3 +37,4 @@ dcar_opensource\motor_control.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_h
 dcar_opensource\motor_control.o: ../Core/Inc/gpio.h
 dcar_opensource\motor_control.o: ../Core/Inc/pid.h
 dcar_opensource\motor_control.o: ../Core/Inc/tim.h
+dcar_opensource\motor_control.o: D:\Keil_v5\ARM\ARMCC\Bin\..\include\math.h

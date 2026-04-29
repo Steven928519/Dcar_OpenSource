@@ -42,10 +42,6 @@ static IMU_InitState_t imu_status = IMU_STATE_RESET;
 static uint8_t remote_mode_enabled = 0;
 //static uint32_t total_ticks = 0;
 
-static uint8_t Read_GPIO_Bit(GPIO_TypeDef *port, uint16_t pin) {
-  return (HAL_GPIO_ReadPin(port, pin) == GPIO_PIN_SET) ? 1U : 0U;
-}
-
 /* -------------------------------------------------------------------------- */
 /* 1000 Hz — IMU 读取 + Mahony 姿态解算                                       */
 /* -------------------------------------------------------------------------- */
@@ -163,7 +159,8 @@ static void LOOP_100HZ(void) {
 /* -------------------------------------------------------------------------- */
 static void LOOP_50HZ(void) {
   if (imu_status == IMU_STATE_READY) {
-    UART4_Debug_SendIMUData(&imu_angles);
+    return;
+#if 0
 
     /* 打印里程计数据，验证方向正负 */
     Odometry_TypeDef odo_data;
@@ -195,6 +192,7 @@ static void LOOP_50HZ(void) {
     }
     //printf("ODO: x:%.1f y:%.1f yaw:%.1f vx:%.1f vy:%.1f\n", odo_data.x,
            //odo_data.y, odo_data.yaw, odo_data.vx, odo_data.vy);
+#endif
   }
 }
 
