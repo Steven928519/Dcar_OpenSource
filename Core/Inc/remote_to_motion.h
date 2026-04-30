@@ -57,6 +57,11 @@ void RemoteToMotion_Update(float current_yaw, uint8_t is_remote_enabled);
  */
 void Motion_HandleManual(float vx, float vy, float w, float current_yaw);
 
+/**
+ * @brief  Handle PS2 remote motion. Yaw hold stays active even with no stick input.
+ */
+void Motion_HandleRemote(float vx, float vy, float w, float current_yaw);
+
 #ifdef __cplusplus
 }
 #endif

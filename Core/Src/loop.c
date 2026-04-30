@@ -64,7 +64,11 @@ static void LOOP_100HZ(void) {
   Uart1_ControlCmd_t uart_cmd;
   PS2_Data_TypeDef data;
   float vx = 0, vy = 0, w = 0;
+  float ly_speed = 0.0f;
+  float lx_speed = 0.0f;
+  float rx_speed = 0.0f;
   uint8_t manual_active = 0;
+  uint8_t remote_active = 0U;
 
   if (imu_status == IMU_STATE_READY) {
     /* ===== 调试：步骤1 ===== */
@@ -109,20 +113,24 @@ static void LOOP_100HZ(void) {
 
       if (remote_mode_enabled && data.connected) {
         /* 使用舵机映射逻辑转换为 mm/s */
-        float ly_speed = ((float)((int32_t)data.ly - REMOTE_CENTER)) *
-                         REMOTE_MAX_SPEED / REMOTE_RANGE;
-        float lx_speed = ((float)((int32_t)data.lx - REMOTE_CENTER)) *
-                         REMOTE_MAX_SPEED / REMOTE_RANGE;
-        float rx_speed = ((float)((int32_t)data.rx - REMOTE_CENTER)) *
-                         REMOTE_MAX_SPEED / REMOTE_RANGE;
+        ly_speed = ((float)((int32_t)data.ly - REMOTE_CENTER)) *
+                   REMOTE_MAX_SPEED / REMOTE_RANGE;
+        lx_speed = ((float)((int32_t)data.lx - REMOTE_CENTER)) *
+                   REMOTE_MAX_SPEED / REMOTE_RANGE;
+        rx_speed = ((float)((int32_t)data.rx - REMOTE_CENTER)) *
+                   REMOTE_MAX_SPEED / REMOTE_RANGE;
 
         /* 应用死区 */
-        if (fabsf(ly_speed) > 20.0f)
+        if (data.ly < REMOTE_CENTER - REMOTE_DEADZONE ||
+            data.ly > REMOTE_CENTER + REMOTE_DEADZONE)
           vy = ly_speed;
-        if (fabsf(lx_speed) > 20.0f)
+        if (data.lx < REMOTE_CENTER - REMOTE_DEADZONE ||
+            data.lx > REMOTE_CENTER + REMOTE_DEADZONE)
           vx = lx_speed;
-        if (fabsf(rx_speed) > 20.0f)
+        if (data.rx < REMOTE_CENTER - REMOTE_DEADZONE ||
+            data.rx > REMOTE_CENTER + REMOTE_DEADZONE)
           w = rx_speed;
+        remote_active = 1U;
       }
     }
 
@@ -134,6 +142,8 @@ static void LOOP_100HZ(void) {
       MoveControl_Update();
       HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin,
                         GPIO_PIN_RESET); // 移动中 LED 常亮
+    } else if (remote_active) {
+      Motion_HandleRemote(vx, vy, w, imu_angles.yaw);
     } else {
       /* Motion_HandleManual 内部包含锁头逻辑 */
       Motion_HandleManual(vx, vy, w, imu_angles.yaw);

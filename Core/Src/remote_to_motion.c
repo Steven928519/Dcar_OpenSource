@@ -105,3 +105,29 @@ void Motion_HandleManual(float vx, float vy, float w, float current_yaw) {
   /* 最终解耦并下发到电机 */
   Motion_Decouple(vy, vx, w);
 }
+
+void Motion_HandleRemote(float vx, float vy, float w, float current_yaw) {
+  uint8_t has_rotation = fabsf(w) > MANUAL_CMD_DEADBAND_MMPS;
+  float yaw_error;
+
+  if (has_rotation) {
+    is_yaw_locked = 0;
+    target_yaw = current_yaw;
+    PID_Reset(&yaw_pid);
+  } else {
+    if (!is_yaw_locked) {
+      is_yaw_locked = 1;
+      target_yaw = current_yaw;
+      PID_Reset(&yaw_pid);
+    }
+
+    yaw_error = target_yaw - current_yaw;
+    if (fabsf(yaw_error) < YAW_HOLD_DEADBAND_DEG) {
+      w = 0.0f;
+    } else {
+      w = PID_Calc(&yaw_pid, target_yaw, current_yaw);
+    }
+  }
+
+  Motion_Decouple(vy, vx, w);
+}
