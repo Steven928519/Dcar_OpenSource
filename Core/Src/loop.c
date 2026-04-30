@@ -62,13 +62,25 @@ static void LOOP_100HZ(void) {
   HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
   
   Uart1_ControlCmd_t uart_cmd;
+  PS2_Data_TypeDef data;
   float vx = 0, vy = 0, w = 0;
   uint8_t manual_active = 0;
 
   if (imu_status == IMU_STATE_READY) {
     /* ===== 调试：步骤1 ===== */
     HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-    
+
+    PS2_Receiver_GetData(&data);
+
+    if (!data.connected) {
+      remote_mode_enabled = 0U;
+      PS2_Receiver_ClearOEvents();
+    } else if (PS2_Receiver_ConsumeOEvent()) {
+      remote_mode_enabled = remote_mode_enabled ? 0U : 1U;
+    }
+    HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin,
+                      remote_mode_enabled ? GPIO_PIN_RESET : GPIO_PIN_SET);
+
     Uart1_Control_GetLatestCmd(&uart_cmd);
 
     /* 1. 串口处理 */
@@ -92,15 +104,8 @@ static void LOOP_100HZ(void) {
 
     /* 2. 遥控处理 (如果没有串口速度指令) */
     if (!manual_active && MoveControl_GetState() != MOVE_EXECUTING) {
-      PS2_Data_TypeDef data;
-      PS2_Receiver_GetData(&data);
 
       // 更新遥控开关指示灯
-      if (data.ch6 >= 550 && data.ch6 <= 650) {
-        remote_mode_enabled = 1;
-      }
-      HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin,
-                        remote_mode_enabled ? GPIO_PIN_RESET : GPIO_PIN_SET);
 
       if (remote_mode_enabled && data.connected) {
         /* 使用舵机映射逻辑转换为 mm/s */

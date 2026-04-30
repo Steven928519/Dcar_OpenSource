@@ -47,6 +47,17 @@ void PS2_Receiver_ParseByte(uint8_t byte);
   */
 void PS2_Receiver_GetData(PS2_Data_TypeDef *data);
 
+/**
+  * @brief  Consume one queued O-key press event.
+  * @retval 1 if an O press event was consumed, otherwise 0.
+  */
+uint8_t PS2_Receiver_ConsumeOEvent(void);
+
+/**
+  * @brief  Clear queued O-key events and debounce state.
+  */
+void PS2_Receiver_ClearOEvents(void);
+
 #ifdef __cplusplus
 }
 #endif

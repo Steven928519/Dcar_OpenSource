@@ -13,6 +13,12 @@
 #define SBUS_FOOTER        0x00
 #define SBUS_PACKET_LENGTH 25
 
+#define PS2_O_PRESS_MIN 550U
+#define PS2_O_PRESS_MAX 650U
+#define PS2_O_RELEASE_STABLE_FRAMES 3U
+#define PS2_O_EVENT_MERGE_MS 50U
+#define PS2_O_EVENT_MAX 3U
+
 /* SBUS 协议状态 */
 typedef enum {
   SBUS_STATE_WAIT_HEADER = 0,
@@ -26,6 +32,13 @@ static PS2_Data_TypeDef ps2_data;
 static uint8_t  sbus_rx_buffer[SBUS_PACKET_LENGTH];
 static uint8_t  sbus_rx_index;
 static SBUS_State_TypeDef sbus_state;
+static volatile uint8_t o_press_events;
+static uint8_t o_pressed_latched;
+static uint8_t o_release_frames;
+static uint32_t o_last_event_tick;
+static uint8_t o_last_event_valid;
+
+static void PS2_ClearOState(void);
 
 /* 解析 SBUS 数据包并提取 16 通道 */
 static uint8_t SBUS_Parse_Packet(uint8_t *packet);
@@ -102,12 +115,50 @@ static uint8_t SBUS_Parse_Packet(uint8_t *packet)
   */
 static void SBUS_StoreChannels(uint16_t *channels)
 {
+  uint32_t now;
+
+  now = HAL_GetTick();
+
   ps2_data.rx = channels[0];   /* CH1 -> 右摇杆 X */
   ps2_data.ry = channels[1];   /* CH2 -> 右摇杆 Y */
   ps2_data.ly = channels[2];   /* CH3 -> 左摇杆 Y */
   ps2_data.lx = channels[3];   /* CH4 -> 左摇杆 X */
   ps2_data.ch6 = channels[5];  /* CH6 -> O 键等 */
   ps2_data.connected = 1;
+
+  if (!o_pressed_latched &&
+      channels[5] >= PS2_O_PRESS_MIN && channels[5] <= PS2_O_PRESS_MAX) {
+    o_pressed_latched = 1U;
+    o_release_frames = 0U;
+    if ((!o_last_event_valid ||
+         now - o_last_event_tick >= PS2_O_EVENT_MERGE_MS) &&
+        o_press_events < PS2_O_EVENT_MAX) {
+      o_press_events++;
+      o_last_event_valid = 1U;
+      o_last_event_tick = now;
+    }
+  } else if (o_pressed_latched &&
+             (channels[5] < PS2_O_PRESS_MIN ||
+              channels[5] > PS2_O_PRESS_MAX)) {
+    if (o_release_frames < PS2_O_RELEASE_STABLE_FRAMES) {
+      o_release_frames++;
+    }
+    if (o_release_frames >= PS2_O_RELEASE_STABLE_FRAMES) {
+      o_pressed_latched = 0U;
+      o_release_frames = 0U;
+    }
+  } else if (o_pressed_latched) {
+    o_release_frames = 0U;
+  }
+}
+
+static void PS2_ClearOState(void)
+{
+  o_press_events = 0U;
+  o_pressed_latched = 0U;
+  o_release_frames = 0U;
+  o_last_event_tick = 0U;
+  o_last_event_valid = 0U;
 }
 
 /**
@@ -159,6 +210,7 @@ void PS2_Receiver_Init(void)
 
   sbus_rx_index = 0;
   sbus_state    = SBUS_STATE_WAIT_HEADER;
+  PS2_ClearOState();
 
   /* 启动 USART2 接收中断 (SBUS) */
   HAL_UART_Receive_IT(&huart2, &sbus_uart_rx_byte, 1);
@@ -186,4 +238,32 @@ void PS2_Receiver_GetData(PS2_Data_TypeDef *data)
   data->ch6       = ps2_data.ch6;
   data->buttons   = ps2_data.buttons;
   data->connected = ps2_data.connected;
+}
+
+uint8_t PS2_Receiver_ConsumeOEvent(void)
+{
+  uint8_t has_event = 0U;
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
+  if (o_press_events > 0U) {
+    o_press_events--;
+    has_event = 1U;
+  }
+  if (primask == 0U) {
+    __enable_irq();
+  }
+
+  return has_event;
+}
+
+void PS2_Receiver_ClearOEvents(void)
+{
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
+  PS2_ClearOState();
+  if (primask == 0U) {
+    __enable_irq();
+  }
 }
